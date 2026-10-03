@@ -9,7 +9,7 @@ jobs:
   update-catalog:
     runs-on: ubuntu-latest
     container:
-      image: mcr.microsoft.com/playwright:v1.44.0-jammy
+      image: python:3.11-slim
       options: --user root
     defaults:
       run:
@@ -18,13 +18,34 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install pip
-        run: python3 -m ensurepip --upgrade
+      - name: Install system dependencies
+        run: |
+          apt-get update && apt-get install -y --no-install-recommends \
+            chromium \
+            chromium-driver \
+            libnss3 \
+            libnspr4 \
+            libatk1.0-0 \
+            libatk-bridge2.0-0 \
+            libcups2 \
+            libdrm2 \
+            libxkbcommon0 \
+            libxcomposite1 \
+            libxdamage1 \
+            libxfixes3 \
+            libxrandr2 \
+            libgbm1 \
+            libasound2t64 \
+            && rm -rf /var/lib/apt/lists/*
 
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: |
           python3 -m pip install --upgrade pip
           pip install -r requirements.txt
+
+      - name: Install Playwright browsers
+        run: |
+          python3 -m playwright install chromium --with-deps
 
       - name: Run catalog update
         run: python3 scrape_futbol_catalog.py && python3 scrape_cuevana_catalog.py
