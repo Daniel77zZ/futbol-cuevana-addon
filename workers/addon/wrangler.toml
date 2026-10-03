@@ -8,8 +8,8 @@ workers_dev = true
 # Streams are written by the GitHub Actions resolver; catalogs by the daily job.
 [[kv_namespaces]]
 binding = "STREAMS_KV"
-id = "REPLACE_WITH_PRODUCTION_KV_NAMESPACE_ID"
-preview_id = "REPLACE_WITH_PREVIEW_KV_NAMESPACE_ID"
+id = "c22a04bbc2064e169849f26e41ecc836"
+preview_id = "cb102384a7724fadb28b84d15f7679fb"
 
 [vars]
 GH_REPO = "user/futbol-cuevana-addon"

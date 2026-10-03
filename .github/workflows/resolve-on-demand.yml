@@ -50,22 +50,9 @@ jobs:
             2>&1 | tee /tmp/extraction.log
 
       - name: Validate extraction result
-        run: |
-          python -c "
-import json
-with open('/tmp/result.json') as f:
-    data = json.load(f)
-if 'error' in data:
-    print(f'Extraction failed: {data[\"error\"]}')
-    exit(1)
-if 'hls' not in data:
-    print('ERROR: No HLS URL in result')
-    exit(1)
-print(f'Successfully extracted HLS: {data[\"hls\"]}')
-print(f'Quality: {data.get(\"quality\", \"unknown\")}')
-"
+        run: python .github/scripts/validate_catalog.py validate_stream /tmp/result.json
 
-      - name: Write stream result to Cloudflare KV (TTL: 7200s / 2 hours)
+      - name: "Write stream result to Cloudflare KV (TTL: 7200s / 2 hours)"
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
@@ -73,7 +60,7 @@ print(f'Quality: {data.get(\"quality\", \"unknown\")}')
           command: |
             kv key put --namespace-id=${{ secrets.CF_KV_NAMESPACE_ID }} \
               --expiration-ttl=7200 \
-              "stream:${{ github.event.inputs.type }}:${{ github.event.inputs.id }}" \
+              'stream:${{ github.event.inputs.type }}:${{ github.event.inputs.id }}' \
               --path=/tmp/result.json
 
       - name: Output result summary

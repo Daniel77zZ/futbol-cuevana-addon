@@ -4,7 +4,7 @@ on:
   schedule:
     # Run daily at 06:00 UTC
     - cron: '0 6 * * *'
-  workflow_dispatch: # Allow manual trigger
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -41,24 +41,13 @@ jobs:
             2>&1 | tee /tmp/scrape-futbol.log
 
       - name: Validate catalog output
-        run: |
-          python -c "
-import json
-with open('/tmp/futbol-catalog.json') as f:
-    data = json.load(f)
-print(f'Catalog items: {len(data)}')
-for item in data[:5]:
-    print(f'  - {item[\"id\"]}: {item[\"name\"]}')
-if len(data) == 0:
-    print('WARNING: Empty catalog!')
-    exit(1)
-"
+        run: python .github/scripts/validate_catalog.py validate_catalog /tmp/futbol-catalog.json futbol
 
       - name: Write futbol catalog to Cloudflare KV
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
-          accountId: ${{ secrets.CF_ACCOUNT_ID }}
+          accountId: ${{ secrets.CF_API_TOKEN }}
           command: |
             kv key put --namespace-id=${{ secrets.CF_KV_NAMESPACE_ID }} \
               "catalog:tv:futbol" \
@@ -91,18 +80,7 @@ if len(data) == 0:
             2>&1 | tee /tmp/scrape-movies.log
 
       - name: Validate movies catalog output
-        run: |
-          python -c "
-import json
-with open('/tmp/cuevana-movies.json') as f:
-    data = json.load(f)
-print(f'Movies catalog items: {len(data)}')
-for item in data[:5]:
-    print(f'  - {item[\"id\"]}: {item[\"name\"]}')
-if len(data) == 0:
-    print('WARNING: Empty movies catalog!')
-    exit(1)
-"
+        run: python .github/scripts/validate_catalog.py validate_catalog /tmp/cuevana-movies.json movies
 
       - name: Write movies catalog to Cloudflare KV
         uses: cloudflare/wrangler-action@v3
@@ -124,18 +102,7 @@ if len(data) == 0:
             2>&1 | tee /tmp/scrape-series.log
 
       - name: Validate series catalog output
-        run: |
-          python -c "
-import json
-with open('/tmp/cuevana-series.json') as f:
-    data = json.load(f)
-print(f'Series catalog items: {len(data)}')
-for item in data[:5]:
-    print(f'  - {item[\"id\"]}: {item[\"name\"]}')
-if len(data) == 0:
-    print('WARNING: Empty series catalog!')
-    exit(1)
-"
+        run: python .github/scripts/validate_catalog.py validate_catalog /tmp/cuevana-series.json series
 
       - name: Write series catalog to Cloudflare KV
         uses: cloudflare/wrangler-action@v3
