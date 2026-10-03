@@ -16,6 +16,9 @@ name: Resolve On Demand
 jobs:
   resolve:
     runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.44.0-jammy
+      options: --user root
     defaults:
       run:
         working-directory: extractors
@@ -23,18 +26,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-
-      - name: Install Playwright
-        run: playwright install chromium --with-deps
 
       - name: Run resolver
         run: python -m extractors.main --target "${{ github.event.inputs.target }}" ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
