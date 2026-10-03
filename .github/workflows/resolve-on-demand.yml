@@ -28,10 +28,10 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
+          python3 -m pip install --upgrade pip
           pip install -r requirements.txt
 
       - name: Run resolver
-        run: python -m extractors.main --target "${{ github.event.inputs.target }}" ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
+        run: python3 -m extractors.main --target "${{ github.event.inputs.target }}" ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
