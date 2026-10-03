@@ -1,0 +1,75 @@
+name: Bug Report
+description: Report a bug in the addon, extractors, or deployment
+title: "[BUG] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug! Please fill out the sections below to help us investigate.
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of the system is affected?
+      options:
+        - "Worker (Cloudflare Worker / Stremio API)"
+        - "Extractors (Python / Playwright / yt-dlp)"
+        - "GitHub Actions (Workflows / CI)"
+        - "Local Development (Docker / Mock KV)"
+        - "Deployment / Configuration"
+        - "Documentation"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Clear description of the bug
+      placeholder: What happened? What did you expect?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: How to reproduce the issue
+      placeholder: |
+        1. Go to ...
+        2. Click ...
+        3. See error ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / Error Output
+      description: Paste relevant logs (GitHub Actions, wrangler tail, extractor output)
+      render: shell
+      placeholder: |
+        $ gh run view --log
+        ERROR: Failed to extract HLS...
+
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Environment
+      options:
+        - "Production (deployed worker)"
+        - "Local (docker-compose.local.yml)"
+        - "GitHub Actions"
+      multiple: true
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I have searched existing issues
+          required: true
+        - label: I have tested locally (if applicable)
+        - label: I have checked the troubleshooting section in README

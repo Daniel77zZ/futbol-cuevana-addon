@@ -1,0 +1,86 @@
+name: Resolve Stream On-Demand
+
+on:
+  workflow_dispatch:
+    inputs:
+      type:
+        description: 'Content type'
+        type: choice
+        required: true
+        options:
+          - futbol
+          - cine
+          - series
+      id:
+        description: 'Content ID (e.g., fc-river-boca, cu-resident-evil)'
+        type: string
+        required: true
+      sourceUrl:
+        description: 'Embed URL to resolve'
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  resolve-stream:
+    name: Resolve Stream
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    container:
+      image: ghcr.io/${{ github.repository }}/extractors:latest
+      options: --user root
+    env:
+      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+      CF_KV_NAMESPACE_ID: ${{ secrets.CF_KV_NAMESPACE_ID }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run stream extraction
+        id: extract
+        run: |
+          python -m extractors.main \
+            --type ${{ github.event.inputs.type }} \
+            --id ${{ github.event.inputs.id }} \
+            --url "${{ github.event.inputs.sourceUrl }}" \
+            --output /tmp/result.json \
+            2>&1 | tee /tmp/extraction.log
+
+      - name: Validate extraction result
+        run: |
+          python -c "
+import json
+with open('/tmp/result.json') as f:
+    data = json.load(f)
+if 'error' in data:
+    print(f'Extraction failed: {data[\"error\"]}')
+    exit(1)
+if 'hls' not in data:
+    print('ERROR: No HLS URL in result')
+    exit(1)
+print(f'Successfully extracted HLS: {data[\"hls\"]}')
+print(f'Quality: {data.get(\"quality\", \"unknown\")}')
+"
+
+      - name: Write stream result to Cloudflare KV (TTL: 7200s / 2 hours)
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CF_API_TOKEN }}
+          accountId: ${{ secrets.CF_ACCOUNT_ID }}
+          command: |
+            kv key put --namespace-id=${{ secrets.CF_KV_NAMESPACE_ID }} \
+              --expiration-ttl=7200 \
+              "stream:${{ github.event.inputs.type }}:${{ github.event.inputs.id }}" \
+              --path=/tmp/result.json
+
+      - name: Output result summary
+        run: |
+          echo "✅ Stream resolved successfully"
+          echo "Type: ${{ github.event.inputs.type }}"
+          echo "ID: ${{ github.event.inputs.id }}"
+          echo "Key: stream:${{ github.event.inputs.type }}:${{ github.event.inputs.id }}"
+          echo "TTL: 7200 seconds (2 hours)"
+          cat /tmp/result.json

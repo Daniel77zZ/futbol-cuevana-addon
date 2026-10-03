@@ -1,0 +1,45 @@
+{
+  "name": "futbol-cuevana-addon",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Stremio addon for Fútbol Libre + Cuevana — Cloudflare Worker + GitHub Actions + Python extractors",
+  "workspaces": [
+    "workers/addon"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=workers/addon",
+    "deploy": "npm run deploy --workspace=workers/addon",
+    "typecheck": "npm run typecheck --workspace=workers/addon",
+    "tail": "npm run tail --workspace=workers/addon",
+    "test": "./scripts/test-local.sh",
+    "setup": "./scripts/setup-secrets.sh",
+    "extractors:build": "docker build -t futbol-cuevana-extractors:local ./extractors",
+    "extractors:shell": "docker-compose -f docker-compose.local.yml exec extractors bash",
+    "kv:mock": "docker-compose -f docker-compose.local.yml up -d mock-kv",
+    "clean": "docker-compose -f docker-compose.local.yml down -v && rm -rf workers/addon/node_modules workers/addon/dist workers/addon/.wrangler"
+  },
+  "devDependencies": {},
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "packageManager": "npm@10.8.0",
+  "keywords": [
+    "stremio",
+    "addon",
+    "futbol",
+    "cuevana",
+    "cloudflare-workers",
+    "github-actions",
+    "streaming"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/user/futbol-cuevana-addon.git"
+  },
+  "bugs": {
+    "url": "https://github.com/user/futbol-cuevana-addon/issues"
+  },
+  "homepage": "https://github.com/user/futbol-cuevana-addon#readme"
+}

@@ -1,0 +1,117 @@
+# Dependabot configuration for automatic dependency updates
+# Updates npm (workers/addon) and pip (extractors) dependencies weekly
+
+version: 2
+updates:
+  # Node.js dependencies in workers/addon
+  - package-ecosystem: "npm"
+    directory: "/workers/addon"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "npm"
+      - "worker"
+    commit-message:
+      prefix: "chore(deps):"
+      prefix-development: "chore(deps-dev):"
+      include: "scope"
+    groups:
+      cloudflare:
+        patterns:
+          - "@cloudflare/*"
+        update-types:
+          - "minor"
+          - "patch"
+      stremio:
+        patterns:
+          - "stremio-addon-sdk"
+          - "@types/stremio-addon-sdk"
+        update-types:
+          - "minor"
+          - "patch"
+      typescript:
+        patterns:
+          - "typescript"
+          - "@types/*"
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      # Major version updates require manual review
+      - dependency-type: "direct"
+        update-type: "version-update:semver-major"
+
+  # Python dependencies in extractors
+  - package-ecosystem: "pip"
+    directory: "/extractors"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "pip"
+      - "extractors"
+    commit-message:
+      prefix: "chore(deps):"
+      include: "scope"
+    groups:
+      playwright:
+        patterns:
+          - "playwright*"
+        update-types:
+          - "minor"
+          - "patch"
+      yt-dlp:
+        patterns:
+          - "yt-dlp"
+        update-types:
+          - "minor"
+          - "patch"
+      http-clients:
+        patterns:
+          - "httpx"
+          - "tenacity"
+        update-types:
+          - "minor"
+          - "patch"
+      parsing:
+        patterns:
+          - "beautifulsoup4"
+          - "lxml"
+        update-types:
+          - "minor"
+          - "patch"
+      pydantic:
+        patterns:
+          - "pydantic"
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      # Major version updates require manual review
+      - dependency-type: "direct"
+        update-type: "version-update:semver-major"
+
+  # GitHub Actions dependencies
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "chore(deps):"
+      include: "scope"

@@ -1,0 +1,56 @@
+# Extractors .dockerignore
+# Files/directories to exclude from Docker build context
+
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.venv/
+venv/
+env/
+*.log
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+
+# Tests (if any)
+tests/
+test_*.py
+*_test.py
+
+# Documentation
+README.md
+docs/
+*.md
+
+# Local development
+docker-compose*.yml
+Dockerfile*
+*.local.*
+.env
+.env.*
+
+# Scripts (not needed in container)
+scripts/

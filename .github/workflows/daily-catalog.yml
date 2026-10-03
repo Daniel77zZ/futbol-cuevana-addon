@@ -1,0 +1,148 @@
+name: Daily Catalog Scrape
+
+on:
+  schedule:
+    # Run daily at 06:00 UTC
+    - cron: '0 6 * * *'
+  workflow_dispatch: # Allow manual trigger
+
+permissions:
+  contents: read
+
+env:
+  CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+  CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+  CF_KV_NAMESPACE_ID: ${{ secrets.CF_KV_NAMESPACE_ID }}
+
+jobs:
+  scrape-futbol-agenda:
+    name: Scrape Futbol Agenda & Catalog
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      image: ghcr.io/${{ github.repository }}/extractors:latest
+      options: --user root
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python environment
+        run: |
+          pip install --no-cache-dir --upgrade pip
+          pip install --no-cache-dir -r extractors/requirements.txt
+          playwright install chromium --with-deps
+
+      - name: Scrape futbol agenda and build catalog
+        id: scrape-futbol
+        run: |
+          python -m extractors.scrape_futbol_catalog \
+            --output /tmp/futbol-catalog.json \
+            --base-url "https://futbollibrefullhd.org/" \
+            2>&1 | tee /tmp/scrape-futbol.log
+
+      - name: Validate catalog output
+        run: |
+          python -c "
+import json
+with open('/tmp/futbol-catalog.json') as f:
+    data = json.load(f)
+print(f'Catalog items: {len(data)}')
+for item in data[:5]:
+    print(f'  - {item[\"id\"]}: {item[\"name\"]}')
+if len(data) == 0:
+    print('WARNING: Empty catalog!')
+    exit(1)
+"
+
+      - name: Write futbol catalog to Cloudflare KV
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CF_API_TOKEN }}
+          accountId: ${{ secrets.CF_ACCOUNT_ID }}
+          command: |
+            kv key put --namespace-id=${{ secrets.CF_KV_NAMESPACE_ID }} \
+              "catalog:tv:futbol" \
+              --path=/tmp/futbol-catalog.json
+
+  scrape-cuevana-catalog:
+    name: Scrape Cuevana Catalog
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      image: ghcr.io/${{ github.repository }}/extractors:latest
+      options: --user root
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python environment
+        run: |
+          pip install --no-cache-dir --upgrade pip
+          pip install --no-cache-dir -r extractors/requirements.txt
+          playwright install chromium --with-deps
+
+      - name: Scrape Cuevana movies catalog
+        id: scrape-movies
+        run: |
+          python -m extractors.scrape_cuevana_catalog \
+            --type movie \
+            --url "https://cuevana3k.pro/peliculas" \
+            --output /tmp/cuevana-movies.json \
+            2>&1 | tee /tmp/scrape-movies.log
+
+      - name: Validate movies catalog output
+        run: |
+          python -c "
+import json
+with open('/tmp/cuevana-movies.json') as f:
+    data = json.load(f)
+print(f'Movies catalog items: {len(data)}')
+for item in data[:5]:
+    print(f'  - {item[\"id\"]}: {item[\"name\"]}')
+if len(data) == 0:
+    print('WARNING: Empty movies catalog!')
+    exit(1)
+"
+
+      - name: Write movies catalog to Cloudflare KV
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CF_API_TOKEN }}
+          accountId: ${{ secrets.CF_ACCOUNT_ID }}
+          command: |
+            kv key put --namespace-id=${{ secrets.CF_KV_NAMESPACE_ID }} \
+              "catalog:movie:cine" \
+              --path=/tmp/cuevana-movies.json
+
+      - name: Scrape Cuevana series catalog
+        id: scrape-series
+        run: |
+          python -m extractors.scrape_cuevana_catalog \
+            --type series \
+            --url "https://cuevana3k.pro/series" \
+            --output /tmp/cuevana-series.json \
+            2>&1 | tee /tmp/scrape-series.log
+
+      - name: Validate series catalog output
+        run: |
+          python -c "
+import json
+with open('/tmp/cuevana-series.json') as f:
+    data = json.load(f)
+print(f'Series catalog items: {len(data)}')
+for item in data[:5]:
+    print(f'  - {item[\"id\"]}: {item[\"name\"]}')
+if len(data) == 0:
+    print('WARNING: Empty series catalog!')
+    exit(1)
+"
+
+      - name: Write series catalog to Cloudflare KV
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CF_API_TOKEN }}
+          accountId: ${{ secrets.CF_ACCOUNT_ID }}
+          command: |
+            kv key put --namespace-id=${{ secrets.CF_KV_NAMESPACE_ID }} \
+              "catalog:series:series" \
+              --path=/tmp/cuevana-series.json

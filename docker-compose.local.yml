@@ -1,0 +1,86 @@
+version: '3.8'
+
+services:
+  # Extractors container with hot reload
+  extractors:
+    build:
+      context: ./extractors
+      dockerfile: Dockerfile
+    image: futbol-cuevana-extractors:local
+    container_name: futbol-extractors
+    volumes:
+      - ./extractors:/app
+      - /ms-playwright:/ms-playwright
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+      - PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+      - HEADLESS=true
+    # Keep container running for docker exec
+    command: ["sleep", "infinity"]
+    networks:
+      - local-dev
+    # Health check
+    healthcheck:
+      test: ["CMD", "python", "-c", "import extractors.main; print('OK')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Mock Cloudflare KV API server
+  mock-kv:
+    image: python:3.12-slim
+    container_name: futbol-mock-kv
+    working_dir: /mock-kv
+    volumes:
+      - ./scripts/mock-kv:/mock-kv
+    command: >
+      bash -c "
+        pip install --no-cache-dir flask &&
+        python server.py
+      "
+    ports:
+      - "8080:8080"
+    environment:
+      - FLASK_ENV=development
+    networks:
+      - local-dev
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  # Cloudflare Worker local dev (wrangler dev --local)
+  addon:
+    image: node:20-alpine
+    container_name: futbol-addon
+    working_dir: /app
+    volumes:
+      - ./workers/addon:/app
+      - ./workers/addon/node_modules:/app/node_modules
+    command: >
+      sh -c "
+        npm install &&
+        npx wrangler dev --local --port 8787 --ip 0.0.0.0
+      "
+    ports:
+      - "8787:8787"
+    environment:
+      - STREAMS_KV=http://mock-kv:8080
+      - TMDB_API_KEY=${TMDB_API_KEY:-}
+      - GH_TOKEN=${GH_TOKEN:-}
+      - GH_REPO=${GH_REPO:-user/futbol-cuevana-addon}
+      - GH_WORKFLOW=resolve-on-demand.yml
+      - GH_REF=main
+    depends_on:
+      mock-kv:
+        condition: service_healthy
+    networks:
+      - local-dev
+
+networks:
+  local-dev:
+    driver: bridge

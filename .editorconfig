@@ -1,0 +1,45 @@
+# EditorConfig for futbol-cuevana-addon
+# https://editorconfig.org
+
+root = true
+
+# Default settings for all files
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# TypeScript / JavaScript / JSON / YAML
+[*.{ts,js,json,yml,yaml}]
+indent_size = 2
+
+# Python
+[*.py]
+indent_size = 4
+max_line_length = 100
+
+# Markdown
+[*.md]
+trim_trailing_whitespace = false
+max_line_length = 0
+
+# Shell scripts
+[*.sh]
+indent_size = 2
+end_of_line = lf
+
+# Dockerfile
+[Dockerfile]
+indent_size = 2
+
+# TOML
+[*.toml]
+indent_size = 2
+
+# Ignore files that don't need formatting
+[*.{log,lock,map}]
+insert_final_newline = false
+trim_trailing_whitespace = false

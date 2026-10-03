@@ -1,0 +1,26 @@
+#:schema node_modules/wrangler/config-schema.json
+name = "futbol-cuevana-addon"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+workers_dev = true
+
+# KV cache for resolved streams and catalogs.
+# Streams are written by the GitHub Actions resolver; catalogs by the daily job.
+[[kv_namespaces]]
+binding = "STREAMS_KV"
+id = "REPLACE_WITH_PRODUCTION_KV_NAMESPACE_ID"
+preview_id = "REPLACE_WITH_PREVIEW_KV_NAMESPACE_ID"
+
+[vars]
+GH_REPO = "user/futbol-cuevana-addon"
+GH_WORKFLOW = "resolve-on-demand.yml"
+GH_REF = "main"
+
+[observability]
+enabled = true
+
+# ---------------------------------------------------------------------------
+# Secrets (never commit these; set them with wrangler):
+#   npx wrangler secret put TMDB_API_KEY
+#   npx wrangler secret put GH_TOKEN
+# ---------------------------------------------------------------------------
