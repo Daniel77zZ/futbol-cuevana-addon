@@ -16,6 +16,9 @@ name: Resolve On Demand
 jobs:
   resolve:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: extractors
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -30,7 +33,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Install Playwright
+        run: playwright install chromium --with-deps
+
       - name: Run resolver
-        run: python scripts/resolve.py --target "${{ github.event.inputs.target }}" ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
+        run: python -m extractors.main --target "${{ github.event.inputs.target }}" ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

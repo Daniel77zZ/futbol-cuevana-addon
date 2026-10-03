@@ -8,6 +8,9 @@ name: Daily Catalog Update
 jobs:
   update-catalog:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: extractors
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -22,7 +25,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Install Playwright
+        run: playwright install chromium --with-deps
+
       - name: Run catalog update
-        run: python scripts/update_catalog.py
+        run: python scrape_futbol_catalog.py && python scrape_cuevana_catalog.py
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
