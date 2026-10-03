@@ -57,7 +57,7 @@ jobs:
 
       - name: Install Playwright browsers
         run: |
-          python3 -m playwright install chromium --with-deps
+          python3 -m playwright install chromium
 
       - name: Resolve stream
         run: python3 -m extractors.main --target "${{ github.event.inputs.target }}" ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}

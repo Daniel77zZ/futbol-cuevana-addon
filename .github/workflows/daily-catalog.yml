@@ -45,7 +45,7 @@ jobs:
 
       - name: Install Playwright browsers
         run: |
-          python3 -m playwright install chromium --with-deps
+          python3 -m playwright install chromium
 
       - name: Run catalog update
         run: python3 scrape_futbol_catalog.py && python3 scrape_cuevana_catalog.py
