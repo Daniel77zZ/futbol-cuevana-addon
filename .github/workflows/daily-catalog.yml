@@ -1,115 +1,28 @@
-name: Daily Catalog Scrape
+name: Daily Catalog Update
 
-on:
+'on':
   schedule:
-    # Run daily at 06:00 UTC
     - cron: '0 6 * * *'
-  workflow_dispatch:
-
-permissions:
-  contents: read
-
-env:
-  CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-  CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-  CF_KV_NAMESPACE_ID: ${{ secrets.CF_KV_NAMESPACE_ID }}
+  workflow_dispatch: {}
 
 jobs:
-  scrape-futbol-agenda:
-    name: Scrape Futbol Agenda & Catalog
+  update-catalog:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    container:
-      image: ghcr.io/${{ github.repository }}/extractors:latest
-      options: --user root
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python environment
-        run: |
-          pip install --no-cache-dir --upgrade pip
-          pip install --no-cache-dir -r extractors/requirements.txt
-          playwright install chromium --with-deps
-
-      - name: Scrape futbol agenda and build catalog
-        id: scrape-futbol
-        run: |
-          python -m extractors.scrape_futbol_catalog \
-            --output /tmp/futbol-catalog.json \
-            --base-url "https://futbollibrefullhd.org/" \
-            2>&1 | tee /tmp/scrape-futbol.log
-
-      - name: Validate catalog output
-        run: python .github/scripts/validate_catalog.py validate_catalog /tmp/futbol-catalog.json futbol
-
-      - name: Write futbol catalog to Cloudflare KV
-        uses: cloudflare/wrangler-action@v3
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          apiToken: ${{ secrets.CF_API_TOKEN }}
-          accountId: ${{ secrets.CF_API_TOKEN }}
-          command: |
-            kv key put --namespace-id=${{ secrets.CF_KV_NAMESPACE_ID }} \
-              "catalog:tv:futbol" \
-              --path=/tmp/futbol-catalog.json
+          python-version: '3.11'
 
-  scrape-cuevana-catalog:
-    name: Scrape Cuevana Catalog
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    container:
-      image: ghcr.io/${{ github.repository }}/extractors:latest
-      options: --user root
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python environment
+      - name: Install dependencies
         run: |
-          pip install --no-cache-dir --upgrade pip
-          pip install --no-cache-dir -r extractors/requirements.txt
-          playwright install chromium --with-deps
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-      - name: Scrape Cuevana movies catalog
-        id: scrape-movies
-        run: |
-          python -m extractors.scrape_cuevana_catalog \
-            --type movie \
-            --url "https://cuevana3k.pro/peliculas" \
-            --output /tmp/cuevana-movies.json \
-            2>&1 | tee /tmp/scrape-movies.log
-
-      - name: Validate movies catalog output
-        run: python .github/scripts/validate_catalog.py validate_catalog /tmp/cuevana-movies.json movies
-
-      - name: Write movies catalog to Cloudflare KV
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CF_API_TOKEN }}
-          accountId: ${{ secrets.CF_ACCOUNT_ID }}
-          command: |
-            kv key put --namespace-id=${{ secrets.CF_KV_NAMESPACE_ID }} \
-              "catalog:movie:cine" \
-              --path=/tmp/cuevana-movies.json
-
-      - name: Scrape Cuevana series catalog
-        id: scrape-series
-        run: |
-          python -m extractors.scrape_cuevana_catalog \
-            --type series \
-            --url "https://cuevana3k.pro/series" \
-            --output /tmp/cuevana-series.json \
-            2>&1 | tee /tmp/scrape-series.log
-
-      - name: Validate series catalog output
-        run: python .github/scripts/validate_catalog.py validate_catalog /tmp/cuevana-series.json series
-
-      - name: Write series catalog to Cloudflare KV
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CF_API_TOKEN }}
-          accountId: ${{ secrets.CF_ACCOUNT_ID }}
-          command: |
-            kv key put --namespace-id=${{ secrets.CF_KV_NAMESPACE_ID }} \
-              "catalog:series:series" \
-              --path=/tmp/cuevana-series.json
+      - name: Run catalog update
+        run: python scripts/update_catalog.py
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

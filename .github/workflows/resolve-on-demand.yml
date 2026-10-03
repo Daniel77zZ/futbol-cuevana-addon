@@ -1,73 +1,36 @@
-name: Resolve Stream On-Demand
+name: Resolve On Demand
 
-on:
+'on':
   workflow_dispatch:
     inputs:
-      type:
-        description: 'Content type'
-        type: choice
+      target:
+        description: 'Target to resolve (e.g., issue number, PR number, or "all")'
         required: true
-        options:
-          - futbol
-          - cine
-          - series
-      id:
-        description: 'Content ID (e.g., fc-river-boca, cu-resident-evil)'
         type: string
-        required: true
-      sourceUrl:
-        description: 'Embed URL to resolve'
-        type: string
-        required: true
-
-permissions:
-  contents: read
+      dry_run:
+        description: 'Run in dry-run mode without making changes'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
-  resolve-stream:
-    name: Resolve Stream
+  resolve:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-    container:
-      image: ghcr.io/${{ github.repository }}/extractors:latest
-      options: --user root
-    env:
-      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-      CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-      CF_KV_NAMESPACE_ID: ${{ secrets.CF_KV_NAMESPACE_ID }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Run stream extraction
-        id: extract
-        run: |
-          python -m extractors.main \
-            --type ${{ github.event.inputs.type }} \
-            --id ${{ github.event.inputs.id }} \
-            --url "${{ github.event.inputs.sourceUrl }}" \
-            --output /tmp/result.json \
-            2>&1 | tee /tmp/extraction.log
-
-      - name: Validate extraction result
-        run: python .github/scripts/validate_catalog.py validate_stream /tmp/result.json
-
-      - name: "Write stream result to Cloudflare KV (TTL: 7200s / 2 hours)"
-        uses: cloudflare/wrangler-action@v3
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          apiToken: ${{ secrets.CF_API_TOKEN }}
-          accountId: ${{ secrets.CF_ACCOUNT_ID }}
-          command: |
-            kv key put --namespace-id=${{ secrets.CF_KV_NAMESPACE_ID }} \
-              --expiration-ttl=7200 \
-              'stream:${{ github.event.inputs.type }}:${{ github.event.inputs.id }}' \
-              --path=/tmp/result.json
+          python-version: '3.11'
 
-      - name: Output result summary
+      - name: Install dependencies
         run: |
-          echo "✅ Stream resolved successfully"
-          echo "Type: ${{ github.event.inputs.type }}"
-          echo "ID: ${{ github.event.inputs.id }}"
-          echo "Key: stream:${{ github.event.inputs.type }}:${{ github.event.inputs.id }}"
-          echo "TTL: 7200 seconds (2 hours)"
-          cat /tmp/result.json
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run resolver
+        run: python scripts/resolve.py --target "${{ github.event.inputs.target }}" ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
