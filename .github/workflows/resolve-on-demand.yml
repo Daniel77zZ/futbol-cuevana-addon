@@ -1,14 +1,18 @@
-name: Resolve On Demand
+name: Resolve Stream On-Demand
 
 'on':
   workflow_dispatch:
     inputs:
       target:
-        description: 'Target to resolve (e.g., issue number, PR number, or "all")'
+        description: 'Target type (futbol/cine/series)'
         required: true
-        type: string
+        type: choice
+        options:
+          - futbol
+          - cine
+          - series
       dry_run:
-        description: 'Run in dry-run mode without making changes'
+        description: 'Dry run (no KV write)'
         required: false
         type: boolean
         default: false
@@ -26,12 +30,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install pip
+        run: python3 -m ensurepip --upgrade
+
       - name: Install dependencies
         run: |
           python3 -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run resolver
+      - name: Resolve stream
         run: python3 -m extractors.main --target "${{ github.event.inputs.target }}" ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
         env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_KV_NAMESPACE_ID: ${{ secrets.CF_KV_NAMESPACE_ID }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
