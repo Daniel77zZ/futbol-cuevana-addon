@@ -9,8 +9,8 @@ from typing import Optional
 
 from pydantic import HttpUrl
 
-from tvf90 import extract_tvf90_hls, TVF90Result
-from cuevana import extract_cuevana_hls, CuevanaResult
+from .tvf90 import extract_tvf90_hls, TVF90Result
+from .cuevana import extract_cuevana_hls, CuevanaResult
 from shared.utils import setup_logger
 
 logger = setup_logger("main")
