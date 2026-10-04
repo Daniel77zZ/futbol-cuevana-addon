@@ -44,10 +44,12 @@ jobs:
           pip install -r requirements.txt
 
       - name: Install Playwright browsers
-        run: |
-          python3 -m playwright install chromium
+        run: python3 -m playwright install chromium
 
       - name: Run catalog update
-        run: python3 scrape_futbol_catalog.py && python3 scrape_cuevana_catalog.py
+        run: |
+          python3 scrape_futbol_catalog.py --output /tmp/futbol-catalog.json
+          python3 scrape_cuevana_catalog.py --type movie --url "https://cuevana3k.pro/peliculas" --output /tmp/cuevana-movies.json
+          python3 scrape_cuevana_catalog.py --type series --url "https://cuevana3k.pro/series" --output /tmp/cuevana-series.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
