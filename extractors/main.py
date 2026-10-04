@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -116,6 +117,11 @@ Examples:
         # Add metadata
         result["id"] = args.id
         result["type"] = args.type
+        # Cloudflare KV readers (workers/addon/src/routes/stream.ts) decide
+        # freshness from this field via isFresh(). Without it every read looks
+        # stale, so the addon re-dispatches a workflow on every single play
+        # instead of serving the cached stream. Unix epoch milliseconds.
+        result["ts"] = int(time.time() * 1000)
 
         # Write output
         output_path = Path(args.output)
