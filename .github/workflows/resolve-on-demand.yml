@@ -82,7 +82,17 @@ jobs:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           CF_KV_NAMESPACE_ID: ${{ secrets.CF_KV_NAMESPACE_ID }}
         run: |
-          curl -X PUT "https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/storage/kv/namespaces/${CF_KV_NAMESPACE_ID}/values/stream:${{ github.event.inputs.target }}:${{ github.event.inputs.id }}" \
+          # Map target to Stremio content type
+          if [ "${{ github.event.inputs.target }}" = "futbol" ]; then
+            STREAM_TYPE="tv"
+          elif [ "${{ github.event.inputs.target }}" = "cine" ]; then
+            STREAM_TYPE="movie"
+          elif [ "${{ github.event.inputs.target }}" = "series" ]; then
+            STREAM_TYPE="series"
+          else
+            STREAM_TYPE="${{ github.event.inputs.target }}"
+          fi
+          curl -X PUT "https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/storage/kv/namespaces/${CF_KV_NAMESPACE_ID}/values/stream:${STREAM_TYPE}:${{ github.event.inputs.id }}" \
             -H "Authorization: Bearer ${CF_API_TOKEN}" \
             -H "Content-Type: application/json" \
             --data-binary @/tmp/result.json
