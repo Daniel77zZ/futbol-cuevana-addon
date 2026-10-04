@@ -20,156 +20,207 @@ from shared.utils import setup_logger
 logger = setup_logger("scrape_futbol_catalog")
 
 
-async def fetch_page(client: httpx.AsyncClient, url: str) -> Optional[str]:
-    """Fetch a page with retries."""
+async def fetch_page_playwright(url: str) -> Optional[str]:
+    """Fetch a page using Playwright to render JavaScript."""
     try:
-        response = await client.get(url, timeout=30.0, follow_redirects=True)
-        response.raise_for_status()
-        return response.text
+        from playwright.async_api import async_playwright
+        
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            context = await browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            )
+            page = await context.new_page()
+            
+            await page.goto(url, wait_until="networkidle", timeout=30000)
+            await page.wait_for_timeout(3000)
+            
+            # Wait for the agenda to load
+            try:
+                await page.wait_for_selector("#menu li, .card, [data-match]", timeout=10000)
+            except:
+                pass
+            
+            await page.wait_for_timeout(2000)
+            
+            html = await page.content()
+            await browser.close()
+            return html
     except Exception as e:
-        logger.error("Failed to fetch %s: %s", url, e)
+        logger.error("Playwright fetch failed for %s: %s", url, e)
         return None
 
 
-def parse_match_card(card: BeautifulSoup, base_url: str) -> Optional[dict]:
-    """Parse a single match card from the agenda page."""
+def parse_match_item(item: dict, base_url: str) -> Optional[dict]:
+    """Parse a match item from the API/JSON data."""
     try:
-        # Find teams
-        teams_elem = card.select_one(".match-teams, .equipos, .teams, h3, .event-title")
-        if not teams_elem:
+        # The API returns matches in a specific format
+        team_a = item.get("team_a", "")
+        team_b = item.get("team_b", "")
+        league = item.get("league", "")
+        time_str = item.get("time", "")
+        channel = item.get("channel", "")
+        embed_url = item.get("embed_url", "")
+        
+        if not team_a:
             return None
         
-        teams_text = teams_elem.get_text(strip=True)
-        # Clean up team names
-        teams_text = re.sub(r'\s+', ' ', teams_text)
-        
-        # Extract team names (format: "Team A vs Team B" or "Team A - Team B")
-        vs_match = re.search(r'(.+?)\s*(?:vs|VS|Vs|-)\s*(.+)', teams_text)
-        if vs_match:
-            team_a = vs_match.group(1).strip()
-            team_b = vs_match.group(2).strip()
-        else:
-            # Fallback: use the whole text
-            team_a = teams_text
-            team_b = ""
-        
-        # Find time
-        time_elem = card.select_one(".match-time, .hora, .time, .hour")
-        match_time = time_elem.get_text(strip=True) if time_elem else ""
-        
-        # Find league/competition
-        league_elem = card.select_one(".match-league, .liga, .competition, .league")
-        league = league_elem.get_text(strip=True) if league_elem else ""
-        
-        # Find channel
-        channel_elem = card.select_one(".match-channel, .canal, .channel, .tv")
-        channel = channel_elem.get_text(strip=True) if channel_elem else ""
-        
-        # Find embed link
-        embed_link = None
-        for link in card.select("a[href*='embed'], a[href*='eventos']"):
-            href = link.get("href", "")
-            if "eventos.html" in href or "embed" in href:
-                embed_link = urljoin(base_url, href)
-                break
-        
-        # Generate ID from teams
+        name = f"{team_a} vs {team_b}" if team_b else team_a
         slug = re.sub(r'[^a-z0-9]+', '-', f"{team_a}-{team_b}".lower()).strip('-')
         match_id = f"fc-{slug}"
         
-        # Build description
         desc_parts = []
-        if league:
-            desc_parts.append(league)
-        if match_time:
-            desc_parts.append(match_time)
-        if channel:
-            desc_parts.append(channel)
+        if item.get("league"):
+            desc_parts.append(item["league"])
+        if item.get("time"):
+            desc_parts.append(item["time"])
+        if item.get("channel"):
+            desc_parts.append(item["channel"])
         description = " - ".join(desc_parts) if desc_parts else "Live football match"
         
-        # Build name
-        name = f"{team_a} vs {team_b}" if team_b else team_a
-        
         return {
-            "id": match_id,
-            "name": name,
+            "id": f"fc-{re.sub(r'[^a-z0-9]+', '-', team_a.lower()).strip('-')}",
+            "name": f"{team_a} vs {team_b}" if team_b else team_a,
             "type": "tv",
-            "poster": f"https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=400&h=600&fit=crop",  # Generic football poster
-            "description": description,
-            "embedUrl": embed_link,
-            "league": league,
-            "time": match_time,
-            "channel": channel,
+            "poster": "https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=400&h=600&fit=crop",
+            "description": " - ".join([p for p in [item.get("league"), item.get("time"), item.get("channel")] if p]),
+            "embedUrl": item.get("embed_url", ""),
+            "league": item.get("league", ""),
+            "time": item.get("time", ""),
+            "channel": item.get("channel", ""),
         }
     except Exception as e:
-        logger.warning("Failed to parse match card: %s", e)
+        logger.warning("Failed to parse match item: %s", e)
         return None
 
 
 async def scrape_futbol_agenda(base_url: str) -> list:
-    """Scrape today's matches from futbol agenda."""
-    async with httpx.AsyncClient(
-        headers={"User-Agent": "Mozilla/5.0 (compatible; FutbolCuevanaBot/1.0)"},
-        follow_redirects=True,
-    ) as client:
-        html = await fetch_page(client, base_url)
-        if not html:
-            return []
-        
-        soup = BeautifulSoup(html, "html.parser")
-        
-        # Find match cards - try multiple selectors
-        match_cards = []
-        for selector in [
-            ".match-card", ".partido", ".event", ".match", 
-            ".fixture", ".game", "article.match",
-            "[class*='match']", "[class*='partido']", "[class*='event']"
-        ]:
-            match_cards = soup.select(selector)
-            if match_cards:
-                logger.info("Found %d matches with selector: %s", len(match_cards), selector)
-                break
-        
-        if not match_cards:
-            logger.warning("No match cards found, trying generic approach")
-            # Try to find any links that look like match embeds
-            all_links = soup.select("a[href*='embed'], a[href*='eventos'], a[href*='partido']")
-            logger.info("Found %d potential embed links", len(all_links))
+    """Scrape today's matches from futbol agenda using Playwright."""
+    agenda_url = urljoin(base_url, "/agenda")
+    
+    html = await fetch_page_playwright(agenda_url)
+    if not html:
+        logger.error("Failed to fetch agenda page")
+        return []
+    
+    # Parse the HTML for match data
+    # The page loads data via JavaScript, check for embedded JSON or API calls
+    soup = BeautifulSoup(html, "html.parser")
+    
+    # Look for embedded JSON data
+    scripts = soup.find_all("script")
+    for script in scripts:
+        if script.string and ("matches" in script.string or "agenda" in script.string or "partidos" in script.string):
+            # Try to extract JSON data
+            text = script.string
+            # Look for JSON arrays
+            json_matches = re.findall(r'\[.*?\]', text, re.DOTALL)
+            for match in json_matches:
+                try:
+                    data = json.loads(match)
+                    if isinstance(data, list) and len(data) > 0:
+                        logger.info("Found JSON data with %d items", len(data))
+                        return data
+                except:
+                    pass
+    
+    # Fallback: try to find match data in the page
+    items = []
+    soup = BeautifulSoup(html, "html.parser")
+    
+    # Look for match cards
+    for card in soup.select(".card, .match, .partido, .event, .fixture, .game, [class*='match'], [class*='partido'], [class*='event']"):
+        try:
+            text = card.get_text(strip=True)
+            if not text or len(text) < 10:
+                continue
             
-            # Create minimal items from links
-            items = []
-            for i, link in enumerate(all_links[:20]):  # Limit to 20
-                href = link.get("href", "")
-                text = link.get_text(strip=True)
-                if not text:
-                    text = f"Match {i+1}"
+            # Try to extract team names, time, channel
+            link = card.find("a", href=True)
+            embed_url = urljoin("https://futbollibrefullhd.org/", link["href"]) if link else ""
+            
+            text = card.get_text(strip=True)
+            if len(text) < 5:
+                continue
+                
+            # Try to extract teams
+            vs_match = re.search(r'(.+?)\s*(?:vs|VS|Vs|-)\s*(.+)', text)
+            if vs_match:
+                team_a = vs_match.group(1).strip()
+                team_b = vs_match.group(2).strip()
+            else:
+                # Try to split by common separators
+                parts = re.split(r'\s+vs\s+|\s+-\s+', text, 1)
+                if len(parts) == 2:
+                    team_a, team_b = parts[0].strip(), parts[1].strip()
+                else:
+                    team_a = text[:50]
+                    team_b = ""
+            
+            # Find time
+            time_match = re.search(r'\d{1,2}:\d{2}', text)
+            match_time = time_match.group(0) if time_match else ""
+            
+            # Find channel
+            channel_match = re.search(r'(ESPN|Fox Sports|DirecTV|TyC|TNT|Star|Disney|Bein|Gol)', text, re.IGNORECASE)
+            channel = channel_match.group(0) if channel_match else ""
+            
+            if not team_a:
+                continue
+                
+            name = f"{team_a} vs {team_b}" if team_b else team_a
+            slug = re.sub(r'[^a-z0-9]+', '-', f"{team_a}-{team_b}".lower()).strip('-')
+            match_id = f"fc-{slug}"
+            
+            # Find embed link
+            embed_link = ""
+            for link in card.find_all("a", href=True):
+                href = link["href"]
+                if "embed" in href or "eventos" in href or "partido" in href or "match" in href:
+                    embed_url = urljoin("https://futbollibrefullhd.org/", href)
+                    embed_url = embed_url
+                    break
+            
+            items.append({
+                "id": match_id,
+                "name": name,
+                "type": "tv",
+                "poster": "https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=400&h=600&fit=crop",
+                "description": " - ".join(filter(None, ["", "", ""])),
+                "embedUrl": embed_url,
+                "league": "",
+                "time": "",
+                "channel": "",
+            })
+        except Exception as e:
+            logger.warning("Failed to parse card: %s", e)
+    
+    # If no items found, try to find embed links directly
+    if not items:
+        soup = BeautifulSoup(html, "html.parser")
+        for link in soup.find_all("a", href=True):
+            href = link.get("href", "")
+            if any(x in href for x in ["embed", "eventos", "partido", "match", "watch"]):
+                text = link.get_text(strip=True) or "Match"
                 items.append({
-                    "id": f"fc-match-{i+1}",
+                    "id": f"fc-{re.sub(r'[^a-z0-9]+', '-', text.lower()).strip('-')}",
                     "name": text,
                     "type": "tv",
                     "poster": "https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=400&h=600&fit=crop",
                     "description": "Live football match",
-                    "embedUrl": urljoin(base_url, href),
+                    "embedUrl": urljoin("https://futbollibrefullhd.org/", href),
+                    "league": "",
+                    "time": "",
+                    "channel": "",
                 })
-            return items
-        
-        # Parse each match card
-        items = []
-        for card in match_cards:
-            item = parse_match_card(card, base_url)
-            if item:
-                items.append(item)
-        
-        return items
+    
+    return items
 
 
 async def resolve_embed_urls(items: list) -> list:
-    """Resolve embed URLs by fetching the embed page and finding the actual stream URL."""
-    # For now, just pass through the embed URL
-    # The actual resolution happens on-demand via the resolve-on-demand workflow
+    """Resolve embed URLs by storing the embed URL for later resolution."""
     for item in items:
         if item.get("embedUrl"):
-            # Store the embed URL for later resolution
             item["sourceUrl"] = item["embedUrl"]
     return items
 
