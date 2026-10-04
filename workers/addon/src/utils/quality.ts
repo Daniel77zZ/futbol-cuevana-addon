@@ -32,7 +32,12 @@ export function normalizeQuality(input?: string | null): string {
   // Bare "HD" (no height) is ambiguous; treat it as 720p, the usual meaning.
   if (/\bhd\b/i.test(value)) return "720p";
 
-  return value;
+  // Anything left is not a resolution label we recognize, so it is noise
+  // rather than a quality. Returning it verbatim puts garbage in front of the
+  // user: extractors that scan the whole HLS URL pick digits out of the auth
+  // token and report "1697p" or "7297p". "auto" is the honest label, and
+  // qualityFromHeight() is the path for a real measured resolution.
+  return "auto";
 }
 
 /** Derives a canonical label from a video height in pixels. */
