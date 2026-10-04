@@ -1,11 +1,17 @@
 import type { Env } from "../index";
 import { logError, logInfo } from "../utils/cache";
 
+/**
+ * Input names must match the `workflow_dispatch.inputs` keys declared in
+ * .github/workflows/resolve-on-demand.yml. GitHub rejects the whole request
+ * with 422 "Unexpected inputs provided" if any key here is not declared there,
+ * so treat these names as a hard contract with that file.
+ */
 export interface DispatchInputs {
-  type: string;
+  /** One of the workflow's declared choices: futbol | cine | series. */
+  target: string;
   id: string;
-  sourceUrl: string;
-  [key: string]: string;
+  url: string;
 }
 
 /**
@@ -45,7 +51,7 @@ export async function triggerResolveWorkflow(env: Env, inputs: DispatchInputs): 
       return false;
     }
 
-    logInfo("gh_dispatch_ok", { type: inputs.type, id: inputs.id, ref });
+    logInfo("gh_dispatch_ok", { target: inputs.target, id: inputs.id, ref });
     return true;
   } catch (err) {
     logError("gh_dispatch_exception", { error: String(err) });

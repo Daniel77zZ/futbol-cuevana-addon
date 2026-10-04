@@ -16,6 +16,17 @@ const SOURCES: Record<string, { label: string; base: string }> = {
   cu: { label: "Cuevana", base: "https://cuevana3.ch" },
 };
 
+/**
+ * Stremio content types do not match the resolver workflow's target choices.
+ * The workflow declares `target` as a choice of futbol/cine/series and
+ * validates it, so translate before dispatching.
+ */
+const TARGET_BY_TYPE: Record<string, string> = {
+  tv: "futbol",
+  movie: "cine",
+  series: "series",
+};
+
 export async function resolveStreams(env: Env, type: string, id: string): Promise<Stream[]> {
   const kv = KvClient.fromEnv(env);
 
@@ -25,8 +36,9 @@ export async function resolveStreams(env: Env, type: string, id: string): Promis
   }
 
   const sourceUrl = await getEmbedUrlFromCatalog(kv, type, id);
-  console.log("DEBUG: resolveStreams", { type, id, sourceUrl });
-  await triggerResolveWorkflow(env, { type, id, sourceUrl });
+  const target = TARGET_BY_TYPE[type] ?? type;
+  console.log("DEBUG: resolveStreams", { type, target, id, sourceUrl });
+  await triggerResolveWorkflow(env, { target, id, url: sourceUrl });
 
   const resolved = await pollForStream(kv, type, id);
   if (!resolved) {
