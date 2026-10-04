@@ -11,6 +11,14 @@ name: Resolve Stream On-Demand
           - futbol
           - cine
           - series
+      id:
+        description: 'Content ID (e.g., fc-espn, cu-resident-evil)'
+        required: true
+        type: string
+      url:
+        description: 'Embed URL to resolve'
+        required: true
+        type: string
       dry_run:
         description: 'Dry run (no KV write)'
         required: false
@@ -60,7 +68,7 @@ jobs:
         run: python3 -m playwright install chromium
 
       - name: Resolve stream
-        run: python3 -m extractors.main --target "${{ github.event.inputs.target }}" ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
+        run: python3 -m extractors.main --type "${{ github.event.inputs.target }}" --id "${{ github.event.inputs.id }}" --url "${{ github.event.inputs.url }}" --output /tmp/result.json
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
