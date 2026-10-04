@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, HttpUrl, Field
 
-from shared.utils import normalize_quality, infer_quality_from_url, setup_logger
+from .shared.utils import normalize_quality, infer_quality_from_url, setup_logger
 
 logger = setup_logger("cuevana")
 

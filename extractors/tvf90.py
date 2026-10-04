@@ -8,8 +8,8 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, HttpUrl, Field
 
-from shared.http import StealthBrowser, navigate_with_retry, wait_for_selector_with_retry, click_if_exists, intercept_hls_requests
-from shared.utils import normalize_quality, infer_quality_from_url, setup_logger
+from .shared.http import StealthBrowser, navigate_with_retry, wait_for_selector_with_retry, click_if_exists, intercept_hls_requests
+from .shared.utils import normalize_quality, infer_quality_from_url, setup_logger
 
 logger = setup_logger("tvf90")
 
