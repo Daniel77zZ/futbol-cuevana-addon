@@ -1,5 +1,8 @@
 name: Resolve Stream On-Demand
 
+permissions:
+  contents: read
+
 'on':
   workflow_dispatch:
     inputs:
@@ -67,32 +70,53 @@ jobs:
       - name: Install Playwright browsers
         run: python3 -m playwright install chromium
 
-      - name: Resolve stream
-        run: python3 -m extractors.main --type "${{ github.event.inputs.target }}" --id "${{ github.event.inputs.id }}" --url "${{ github.event.inputs.url }}" --output /tmp/result.json
+      - name: Validate inputs
         env:
+          TARGET: ${{ inputs.target }}
+          CONTENT_ID: ${{ inputs.id }}
+          EMBED_URL: ${{ inputs.url }}
+        run: |
+          set -eu
+          if ! printf '%s' "$TARGET" | grep -Eq '^(futbol|cine|series)$'; then
+            echo "::error::Invalid target: $TARGET"; exit 1
+          fi
+          # The content id becomes part of a Cloudflare KV key, so it must not
+          # contain ':' or '/' -- otherwise it could address arbitrary keys.
+          if ! printf '%s' "$CONTENT_ID" | grep -Eq '^[A-Za-z0-9._-]{1,64}$'; then
+            echo "::error::Invalid id: must match [A-Za-z0-9._-]{1,64}"; exit 1
+          fi
+          if ! printf '%s' "$EMBED_URL" | grep -Eq '^https?://[^[:space:]]+$'; then
+            echo "::error::Invalid url: must be an absolute http(s) URL"; exit 1
+          fi
+
+      - name: Resolve stream
+        env:
+          TARGET: ${{ inputs.target }}
+          CONTENT_ID: ${{ inputs.id }}
+          EMBED_URL: ${{ inputs.url }}
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           CF_KV_NAMESPACE_ID: ${{ secrets.CF_KV_NAMESPACE_ID }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 -m extractors.main --type "$TARGET" --id "$CONTENT_ID" --url "$EMBED_URL" --output /tmp/result.json
 
       - name: Write stream to Cloudflare KV
-        if: github.event.inputs.dry_run != 'true'
+        if: ${{ !inputs.dry_run }}
         env:
+          TARGET: ${{ inputs.target }}
+          CONTENT_ID: ${{ inputs.id }}
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           CF_KV_NAMESPACE_ID: ${{ secrets.CF_KV_NAMESPACE_ID }}
         run: |
-          # Map target to Stremio content type
-          if [ "${{ github.event.inputs.target }}" = "futbol" ]; then
-            STREAM_TYPE="tv"
-          elif [ "${{ github.event.inputs.target }}" = "cine" ]; then
-            STREAM_TYPE="movie"
-          elif [ "${{ github.event.inputs.target }}" = "series" ]; then
-            STREAM_TYPE="series"
-          else
-            STREAM_TYPE="${{ github.event.inputs.target }}"
-          fi
-          curl -X PUT "https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/storage/kv/namespaces/${CF_KV_NAMESPACE_ID}/values/stream:${STREAM_TYPE}:${{ github.event.inputs.id }}" \
+          set -eu
+          case "$TARGET" in
+            futbol) STREAM_TYPE="tv" ;;
+            cine)   STREAM_TYPE="movie" ;;
+            series) STREAM_TYPE="series" ;;
+            *)      echo "::error::Invalid target: $TARGET"; exit 1 ;;
+          esac
+          curl -X PUT "https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/storage/kv/namespaces/${CF_KV_NAMESPACE_ID}/values/stream:${STREAM_TYPE}:${CONTENT_ID}" \
             -H "Authorization: Bearer ${CF_API_TOKEN}" \
             -H "Content-Type: application/json" \
             --data-binary @/tmp/result.json

@@ -1,5 +1,8 @@
 name: Daily Catalog Update
 
+permissions:
+  contents: read
+
 'on':
   schedule:
     - cron: '0 6 * * *'

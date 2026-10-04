@@ -25,7 +25,7 @@ export interface Env {
   TMDB_API_KEY: string;
   /** GitHub token with `actions:write` (secret). */
   GH_TOKEN: string;
-  /** Target repository, e.g. "user/futbol-cuevana-addon". */
+  /** Target repository in "owner/name" form, e.g. "Daniel77zZ/futbol-cuevana-addon". */
   GH_REPO: string;
   /** Workflow file to dispatch, e.g. "resolve-on-demand.yml". */
   GH_WORKFLOW: string;

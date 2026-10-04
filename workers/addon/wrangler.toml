@@ -12,7 +12,7 @@ id = "c22a04bbc2064e169849f26e41ecc836"
 preview_id = "cb102384a7724fadb28b84d15f7679fb"
 
 [vars]
-GH_REPO = "user/futbol-cuevana-addon"
+GH_REPO = "Daniel77zZ/futbol-cuevana-addon"
 GH_WORKFLOW = "resolve-on-demand.yml"
 GH_REF = "main"
 
