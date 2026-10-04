@@ -25,7 +25,7 @@ jobs:
       options: --user root
     defaults:
       run:
-        working-directory: /__w/futbol-cuevana-addon/futbol-cuevana-addon/extractors
+        working-directory: /__w/futbol-cuevana-addon/futbol-cuevana-addon
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -54,7 +54,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python3 -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r extractors/requirements.txt
 
       - name: Install Playwright browsers
         run: python3 -m playwright install chromium
