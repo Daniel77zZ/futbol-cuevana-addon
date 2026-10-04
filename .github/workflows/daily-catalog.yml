@@ -53,3 +53,33 @@ jobs:
           python3 scrape_cuevana_catalog.py --type series --url "https://cuevana3k.pro/series" --output /tmp/cuevana-series.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Write futbol catalog to Cloudflare KV
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CF_API_TOKEN }}
+          accountId: ${{ secrets.CF_ACCOUNT_ID }}
+          command: |
+            kv key put --namespace-id=${{ secrets.CF_KV_NAMESPACE_ID }} \
+              "catalog:tv:futbol" \
+              --path=/tmp/futbol-catalog.json
+
+      - name: Write movies catalog to Cloudflare KV
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CF_API_TOKEN }}
+          accountId: ${{ secrets.CF_ACCOUNT_ID }}
+          command: |
+            kv key put --namespace-id=${{ secrets.CF_KV_NAMESPACE_ID }} \
+              "catalog:movie:cine" \
+              --path=/tmp/cuevana-movies.json
+
+      - name: Write series catalog to Cloudflare KV
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CF_API_TOKEN }}
+          accountId: ${{ secrets.CF_ACCOUNT_ID }}
+          command: |
+            kv key put --namespace-id=${{ secrets.CF_KV_NAMESPACE_ID }} \
+              "catalog:series:series" \
+              --path=/tmp/cuevana-series.json
