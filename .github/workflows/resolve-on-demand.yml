@@ -25,7 +25,7 @@ jobs:
       options: --user root
     defaults:
       run:
-        working-directory: extractors
+        working-directory: /__w/futbol-cuevana-addon/futbol-cuevana-addon/extractors
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -48,6 +48,7 @@ jobs:
             libxrandr2 \
             libgbm1 \
             libasound2t64 \
+            curl \
             && rm -rf /var/lib/apt/lists/*
 
       - name: Install Python dependencies
@@ -56,8 +57,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: Install Playwright browsers
-        run: |
-          python3 -m playwright install chromium
+        run: python3 -m playwright install chromium
 
       - name: Resolve stream
         run: python3 -m extractors.main --target "${{ github.event.inputs.target }}" ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}

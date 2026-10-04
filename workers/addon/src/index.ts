@@ -7,11 +7,14 @@
  *   GET /meta/:type/:id.json
  *   GET /catalog/:type/:id.json
  *   GET /catalog/:type/:id/:extra.json
+ *   GET /debug/catalog
+ *   GET /debug/stream
  */
 import { generateManifest } from "./manifest";
 import { getCatalog } from "./routes/catalog";
 import { getMeta } from "./routes/meta";
 import { resolveStreams } from "./routes/stream";
+import { debugCatalog, debugStream } from "./routes/debug";
 import { logError } from "./utils/cache";
 
 /** Bindings, vars and secrets available to the Worker (see wrangler.toml). */
@@ -38,14 +41,13 @@ const CORS_HEADERS: Record<string, string> = {
 };
 
 const VALID_TYPES = new Set(["movie", "series", "tv"]);
-const VALID_RESOURCES = new Set(["stream", "meta", "catalog"]);
+const VALID_RESOURCES = new Set(["stream", "meta", "catalog", "debug"]);
 
 export function jsonResponse(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
     headers: {
       "Content-Type": "application/json; charset=utf-8",
-      // Dynamic, on-demand content: never let intermediaries cache it.
       "Cache-Control": "no-store",
       ...CORS_HEADERS,
     },
@@ -58,7 +60,6 @@ export function errorResponse(message: string, status = 500): Response {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    // CORS preflight (Stremio Web fetches from the browser).
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: CORS_HEADERS });
     }
@@ -73,6 +74,21 @@ export default {
         return jsonResponse(generateManifest());
       }
 
+      // Handle debug endpoints first (before Stremio routing)
+      if (pathname.startsWith("/debug/")) {
+        const debugSegments = pathname.replace(/^\/debug\//, "").split("/");
+        const debugType = debugSegments[0];
+        const debugId = debugSegments[1] || "";
+        
+        if (debugType === "catalog") {
+          return jsonResponse(await debugCatalog(env, debugType, debugId));
+        }
+        if (debugType === "stream") {
+          return jsonResponse(await debugStream(env, debugType, debugId));
+        }
+        return errorResponse("Not found", 404);
+      }
+
       const segments = pathname.split("/").filter(Boolean);
       const resource = segments[0];
       const type = segments[1];
@@ -83,10 +99,9 @@ export default {
         return errorResponse("Not found", 404);
       }
       if (!VALID_TYPES.has(type)) {
-        return errorResponse(`Unsupported type: ${type}`, 400);
+        return errorResponse("Unsupported type: " + type, 400);
       }
 
-      // Everything after /:resource/:type/, minus the trailing `.json`.
       const rest = segments.slice(2).join("/").replace(/\.json$/i, "");
       if (!rest) return errorResponse("Missing id", 400);
 
@@ -109,12 +124,6 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
-/**
- * Splits the path remainder into `id` and Stremio `extra`.
- *
- * Only catalogs carry an extra segment: `/catalog/tv/futbol/search=foo.json`.
- * `skip` extra is also represented as a path segment in some clients.
- */
 function splitIdAndExtra(
   resource: string,
   rest: string,
@@ -130,7 +139,6 @@ function splitIdAndExtra(
   };
 }
 
-/** Parses either a URL-encoded JSON blob or a `key=value&key2=value2` string. */
 function parseExtra(raw?: string): Record<string, string> {
   const extra: Record<string, string> = {};
   if (!raw) return extra;
