@@ -75,15 +75,15 @@ async def extract_vidhide_hls(embed_url: str, headless: bool = True) -> VidHideR
         await browser.start()
         
         async with browser.new_page() as page:
-            # Intercept ALL requests to find HLS URLs (VidHide m3u8 URLs don't always contain .m3u8)
-            intercepted = await intercept_hls_requests(page, "token=")
+            # Intercept ALL requests from VidHide domains to find HLS URLs
+            intercepted = await intercept_hls_requests(page, "lkhjerbhye")
             
             # Navigate to tungtungsahur token URL
             await navigate_with_retry(page, embed_url)
             
             # Wait for redirect to VidHide iframe
             # The loader JS will decode token and redirect
-            await asyncio.sleep(3)
+            await asyncio.sleep(5)
             
             # Check if we're on VidHide domain
             current_url = page.url
@@ -108,13 +108,16 @@ async def extract_vidhide_hls(embed_url: str, headless: bool = True) -> VidHideR
                 final_url = vidhide_frame.url
                 
                 # Wait for JWPlayer to load and request HLS
-                await asyncio.sleep(5)
+                await asyncio.sleep(8)
                 
 # Check intercepted URLs
             if intercepted:
-                # Filter for valid VidHide HLS URLs - look for token= and m3u8-like patterns
+                # Filter for valid VidHide HLS URLs - look for m3u8-like patterns
                 for url in intercepted:
-                    if "token=" in url and (".m3u8" in url or "m3u8" in url or "master" in url or "/v/" in url):
+                    if (".m3u8" in url or "m3u8" in url or "master" in url or "playlist" in url or "/v/" in url or "token=" in url):
+                        # Skip non-stream requests (like js, css, images)
+                        if any(ext in url for ext in [".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".woff", ".ttf", ".eot", ".map"]):
+                            continue
                         hls_url = url
                         logger.info("Using intercepted HLS URL: %s", hls_url)
                         break
