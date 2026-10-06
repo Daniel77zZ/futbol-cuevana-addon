@@ -136,15 +136,26 @@ async def click_if_exists(page: Page, selector: str, timeout: int = 5000) -> boo
         return False
 
 
-async def intercept_hls_requests(page: Page, domain_filter: str = "fubo18.com") -> list[str]:
-    """Intercept network requests and return HLS URLs matching domain filter."""
+async def intercept_hls_requests(page: Page, filter_pattern: str = "fubo18.com") -> list[str]:
+    """Intercept network requests and return HLS URLs matching filter pattern.
+    
+    Args:
+        page: Playwright page
+        filter_pattern: Pattern to match in URL (e.g., "fubo18.com", "token=", ".m3u8")
+    
+    Returns:
+        List of intercepted HLS URLs
+    """
     hls_urls: list[str] = []
 
     def handle_request(request):
         url = request.url
-        if domain_filter in url and ".m3u8" in url and "token=" in url:
-            hls_urls.append(url)
-            logger.info("Intercepted HLS URL: %s", url)
+        # Match filter pattern and look for m3u8 or token indicators
+        if filter_pattern in url:
+            # Check if it looks like an HLS stream (has token or m3u8)
+            if "token=" in url or ".m3u8" in url or "m3u8" in url or "master" in url:
+                hls_urls.append(url)
+                logger.info("Intercepted HLS URL: %s", url)
 
     page.on("request", handle_request)
     return hls_urls
