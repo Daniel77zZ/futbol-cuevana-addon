@@ -328,6 +328,12 @@ async def extract_vidhide_hls(embed_url: str, headless: bool = True) -> VidHideR
                                         }
                                     }
                                 }
+                                // NEW: Search for flood.sourcerrr.online manifest pattern specifically
+                                const floodMatches = text.match(/https?:\\/\\/[^"']*flood\\.sourcerrr\\.online[^"']*\\.mpd[^"']/g);
+                                if (floodMatches) return floodMatches[0];
+                                // NEW: Search for sacdn/dash pattern
+                                const sacdnMatches = text.match(/https?:\\/\\/[^"']*sacdn\\/dash[^"']*\\.mpd[^"']/g);
+                                if (sacdnMatches) return sacdnMatches[0];
                                 return null;
                             }"""
                         )
@@ -338,6 +344,57 @@ async def extract_vidhide_hls(embed_url: str, headless: bool = True) -> VidHideR
                     except Exception as e:
                         logger.debug("Frame evaluation failed: %s", e)
                         continue
+                
+                # NEW: If still no URL, try broader search in all frames including localStorage/sessionStorage
+                if not hls_url:
+                    logger.info("Trying broader search in all frames (localStorage, sessionStorage, window)...")
+                    for frame in page.frames:
+                        try:
+                            frame_hls = await frame.evaluate(
+                                """() => {
+                                    // Check localStorage
+                                    for (let i = 0; i < localStorage.length; i++) {
+                                        const key = localStorage.key(i);
+                                        const val = localStorage.getItem(key);
+                                        if (val && (val.includes('.mpd') || val.includes('flood.sourcerrr.online') || val.includes('sacdn/dash'))) {
+                                            return {url: val, source: 'localStorage:' + key};
+                                        }
+                                    }
+                                    // Check sessionStorage
+                                    for (let i = 0; i < sessionStorage.length; i++) {
+                                        const key = sessionStorage.key(i);
+                                        const val = sessionStorage.getItem(key);
+                                        if (val && (val.includes('.mpd') || val.includes('flood.sourcerrr.online') || val.includes('sacdn/dash'))) {
+                                            return {url: val, source: 'sessionStorage:' + key};
+                                        }
+                                    }
+                                    // Check all window properties for manifest URLs
+                                    for (const key of Object.keys(window)) {
+                                        try {
+                                            const val = window[key];
+                                            if (typeof val === 'string' && (val.includes('.mpd') || val.includes('flood.sourcerrr.online') || val.includes('sacdn/dash'))) {
+                                                return {url: val, source: 'window.' + key};
+                                            }
+                                            if (val && typeof val === 'object') {
+                                                const str = JSON.stringify(val);
+                                                if (str.includes('.mpd') || str.includes('flood.sourcerrr.online') || str.includes('sacdn/dash')) {
+                                                    // Try to extract URL from object
+                                                    const urlMatch = str.match(/https?:\\/\\/[^"']*\\.mpd[^"']/);
+                                                    if (urlMatch) return {url: urlMatch[0], source: 'window.' + key + ' (JSON)'};
+                                                }
+                                            }
+                                        } catch (e) {}
+                                    }
+                                    return null;
+                                }"""
+                            )
+                            if frame_hls:
+                                hls_url = frame_hls['url'] if isinstance(frame_hls, dict) else frame_hls
+                                logger.info("Extracted HLS from broad search: %s (source: %s)", hls_url, frame_hls.get('source', 'unknown') if isinstance(frame_hls, dict) else 'unknown')
+                                break
+                        except Exception as e:
+                            logger.debug("Broad frame search failed: %s", e)
+                            continue
     
     finally:
         await browser.stop()
