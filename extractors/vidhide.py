@@ -118,12 +118,9 @@ async def extract_vidhide_hls(embed_url: str, headless: bool = True) -> VidHideR
         await browser.start()
         
         async with browser.new_page() as page:
-            # Intercept ALL requests matching HLS/DASH patterns across all relevant domains
-            intercepted = await intercept_hls_requests(page, [
-                "lkhjerbhye", "cloudorchestranova", "vidsrc", "data.vidsrc", 
-                "vsembed", "vidhide", "filemoon", "dood", "streamtape",
-                "flood.sourcerrr.online", "sacdn.hakunaymatata.com"
-            ])
+            # Intercept ALL requests - filter by HLS/DASH patterns only (no domain filter)
+            # This catches MPD requests from any CDN domain
+            intercepted = await intercept_hls_requests(page, None)
             
             # Navigate directly to the decoded video URL (the actual video page)
             await navigate_with_retry(page, video_url)
