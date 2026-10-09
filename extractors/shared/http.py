@@ -137,21 +137,19 @@ async def click_if_exists(page: Page, selector: str, timeout: int = 5000) -> boo
 
 
 async def intercept_hls_requests(page: Page, filter_patterns: list[str] = None) -> list[str]:
-    """Intercept network requests and return HLS URLs matching HLS patterns.
+    """Intercept network requests and return HLS/DASH URLs matching patterns.
     
     Args:
         page: Playwright page
         filter_patterns: Optional list of domain patterns to also filter by (e.g., ["lkhjerbhye", "cloudorchestranova"])
-                        If None, intercepts ALL requests and filters by HLS patterns only.
+                        If None, intercepts ALL requests and filters by HLS/DASH patterns only.
     
     Returns:
-        List of intercepted HLS URLs
+        List of intercepted HLS/DASH URLs
     """
     hls_urls: list[str] = []
-
-    def handle_request(request):
-        url = request.url
-        
+    
+    def check_and_add(url: str):
         # If domain patterns provided, check if URL matches any
         if filter_patterns:
             domain_match = any(pattern in url for pattern in filter_patterns)
@@ -159,13 +157,33 @@ async def intercept_hls_requests(page: Page, filter_patterns: list[str] = None) 
                 return
         
         # Check if it looks like an HLS/DASH stream (has token or m3u8/mpd indicators)
-        hls_indicators = ["token=", ".m3u8", "m3u8", "master", "playlist", "/v/", "/segment/", "/seg-", ".ts", ".mpd", "dash"]
+        hls_indicators = ["token=", ".m3u8", "m3u8", "master", "playlist", "/v/", "/segment/", "/seg-", ".ts", ".mpd", "dash", "sacdn", "init-stream", "seg-", ".m4s"]
         if any(indicator in url for indicator in hls_indicators):
             # Skip non-stream requests (js, css, images, fonts, etc.)
             if any(ext in url for ext in [".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".woff", ".ttf", ".eot", ".map", ".ico", ".woff2"]):
                 return
-            hls_urls.append(url)
-            logger.info("Intercepted HLS URL: %s", url)
-
+            if url not in hls_urls:
+                hls_urls.append(url)
+                logger.info("Intercepted HLS/DASH URL: %s", url)
+    
+    def handle_request(request):
+        check_and_add(request.url)
+    
+    def handle_response(response):
+        check_and_add(response.url)
+    
+    # Attach to main page
     page.on("request", handle_request)
+    page.on("response", handle_response)
+    
+    # Also attach to all existing and future frames
+    def attach_to_frame(frame):
+        frame.on("request", handle_request)
+        frame.on("response", handle_response)
+    
+    for frame in page.frames:
+        attach_to_frame(frame)
+    
+    page.on("frameattached", lambda frame: attach_to_frame(frame))
+    
     return hls_urls
