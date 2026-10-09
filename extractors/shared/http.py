@@ -136,12 +136,13 @@ async def click_if_exists(page: Page, selector: str, timeout: int = 5000) -> boo
         return False
 
 
-async def intercept_hls_requests(page: Page, filter_pattern: str = "fubo18.com") -> list[str]:
-    """Intercept network requests and return HLS URLs matching filter pattern.
+async def intercept_hls_requests(page: Page, filter_patterns: list[str] = None) -> list[str]:
+    """Intercept network requests and return HLS URLs matching HLS patterns.
     
     Args:
         page: Playwright page
-        filter_pattern: Pattern to match in URL (e.g., "fubo18.com", "token=", ".m3u8")
+        filter_patterns: Optional list of domain patterns to also filter by (e.g., ["lkhjerbhye", "cloudorchestranova"])
+                        If None, intercepts ALL requests and filters by HLS patterns only.
     
     Returns:
         List of intercepted HLS URLs
@@ -150,12 +151,21 @@ async def intercept_hls_requests(page: Page, filter_pattern: str = "fubo18.com")
 
     def handle_request(request):
         url = request.url
-        # Match filter pattern and look for m3u8 or token indicators
-        if filter_pattern in url:
-            # Check if it looks like an HLS stream (has token or m3u8)
-            if "token=" in url or ".m3u8" in url or "m3u8" in url or "master" in url:
-                hls_urls.append(url)
-                logger.info("Intercepted HLS URL: %s", url)
+        
+        # If domain patterns provided, check if URL matches any
+        if filter_patterns:
+            domain_match = any(pattern in url for pattern in filter_patterns)
+            if not domain_match:
+                return
+        
+        # Check if it looks like an HLS/DASH stream (has token or m3u8/mpd indicators)
+        hls_indicators = ["token=", ".m3u8", "m3u8", "master", "playlist", "/v/", "/segment/", "/seg-", ".ts", ".mpd", "dash"]
+        if any(indicator in url for indicator in hls_indicators):
+            # Skip non-stream requests (js, css, images, fonts, etc.)
+            if any(ext in url for ext in [".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".woff", ".ttf", ".eot", ".map", ".ico", ".woff2"]):
+                return
+            hls_urls.append(url)
+            logger.info("Intercepted HLS URL: %s", url)
 
     page.on("request", handle_request)
     return hls_urls
