@@ -97,13 +97,23 @@ async def extract_vidhide_hls(embed_url: str, headless: bool = True) -> VidHideR
     final_url = embed_url
     
     try:
-        # First, decode the token to get the video ID and construct the direct video URL
-        token = extract_token_from_url(embed_url)
-        if not token:
-            raise RuntimeError("No token found in tungtungsahur URL")
+        # Detect if this is a direct player URL (vidlink.pro, vsembed.ru, etc.) vs tungtungsahur token URL
+        is_direct_player = any(domain in embed_url for domain in [
+            "vidlink.pro", "vsembed.ru", "player.videasy.net", "vidapi.xyz", "vidhide"
+        ])
         
-        video_url = await decode_token_xor(token)
-        logger.info("Decoded video URL: %s", video_url)
+        if is_direct_player:
+            # Direct player URL - use as-is
+            video_url = embed_url
+            logger.info("Direct player URL detected: %s", video_url)
+        else:
+            # TungTungSahur token URL - decode token
+            token = extract_token_from_url(embed_url)
+            if not token:
+                raise RuntimeError("No token found in tungtungsahur URL")
+            
+            video_url = await decode_token_xor(token)
+            logger.info("Decoded video URL: %s", video_url)
         
         await browser.start()
         
