@@ -125,8 +125,17 @@ async def extract_vidhide_hls(embed_url: str, headless: bool = True) -> VidHideR
             # Navigate directly to the decoded video URL (the actual video page)
             await navigate_with_retry(page, video_url)
             
-            # Wait for page load and JWPlayer/hls.js initialization
-            await asyncio.sleep(5)
+            # Wait for page load and JWPlayer/hls.js initialization + MPD request
+            # Increased from 5s to 15s to allow JWPlayer to fully initialize and request MPD
+            logger.info("Waiting for JWPlayer to initialize and request MPD...")
+            await asyncio.sleep(15)
+            
+            # Additional wait for video element to appear (JWPlayer creates it dynamically)
+            try:
+                await page.wait_for_selector("video", timeout=10000)
+                logger.info("Video element detected")
+            except Exception:
+                logger.warning("Video element not found within 10s, continuing anyway")
             
             current_url = page.url
             logger.info("Current URL on video page: %s", current_url)
