@@ -234,6 +234,21 @@ async def extract_vidhide_hls(embed_url: str, headless: bool = True) -> VidHideR
                         logger.info("Using intercepted HLS/DASH URL: %s", hls_url)
                         break
             
+            # NEW: If we got segment URLs (init-stream.m4s, seg-*.m4s), construct manifest URL
+            if not hls_url or not (".mpd" in hls_url or ".m3u8" in hls_url):
+                for url in intercepted:
+                    # Look for DASH segment patterns: /sacdn/dash/{id}/init-stream.m4s or seg-*.m4s
+                    if "sacdn" in url and ("init-stream" in url or "seg-" in url) and url.endswith(".m4s"):
+                        # Construct manifest URL: replace segment with index_web.mpd
+                        # Pattern: .../sacdn/dash/{id}/init-stream3.m4s?params -> .../sacdn/dash/{id}/index_web.mpd?params
+                        manifest_url = url.replace("/init-stream", "/index_web").replace(".m4s", ".mpd")
+                        # Also handle seg-* patterns
+                        import re
+                        manifest_url = re.sub(r"/seg-\d+\.m4s(\?.*)?$", r"/index_web.mpd\1", manifest_url)
+                        logger.info("Constructed manifest URL from segment: %s", manifest_url)
+                        hls_url = manifest_url
+                        break
+            
             logger.info("hls_url after intercept check: %s", hls_url)
             
             # If we only got the page URL (not m3u8/mpd), try to extract real manifest from JS context
