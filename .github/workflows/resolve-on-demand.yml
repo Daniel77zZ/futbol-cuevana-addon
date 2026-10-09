@@ -5,16 +5,16 @@ permissions:
 
 'on':
   workflow_dispatch:
-inputs:
-        target:
-          description: 'Target type (futbol/cine/series/vidhide)'
-          required: true
-          type: choice
-          options:
-            - futbol
-            - cine
-            - series
-            - vidhide
+    inputs:
+      target:
+        description: 'Target type (futbol/cine/series/vidhide)'
+        required: true
+        type: choice
+        options:
+          - futbol
+          - cine
+          - series
+          - vidhide
       id:
         description: 'Content ID (e.g., fc-espn, cu-resident-evil)'
         required: true
