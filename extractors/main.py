@@ -12,6 +12,7 @@ from pydantic import HttpUrl
 
 from .tvf90 import extract_tvf90_hls, TVF90Result
 from .cuevana import extract_cuevana_hls, CuevanaResult
+from .vidhide import extract_vidhide_hls, VidHideResult
 from .shared.utils import setup_logger
 
 logger = setup_logger("main")
@@ -31,9 +32,9 @@ async def run_extraction(
     Run extraction based on type.
 
     Args:
-        extract_type: 'futbol' (tvf90), 'cine' or 'series' (cuevana hosts)
+        extract_type: 'futbol' (tvf90), 'cine' or 'series' (cuevana hosts), 'vidhide' (tungtungsahur/VidHide)
         embed_url: The embed URL to extract from
-        headless: Run browser in headless mode (for tvf90)
+        headless: Run browser in headless mode (for tvf90, vidhide)
 
     Returns:
         Dictionary with hls, quality, sourceUrl
@@ -46,8 +47,12 @@ async def run_extraction(
         logger.info("Running cuevana extraction for: %s", embed_url)
         result: CuevanaResult = await extract_cuevana_hls(embed_url)
         return result.model_dump(mode="json")
+    elif extract_type == "vidhide":
+        logger.info("Running vidhide extraction for: %s", embed_url)
+        result: VidHideResult = await extract_vidhide_hls(embed_url, headless=headless)
+        return result.model_dump(mode="json")
     else:
-        raise ValueError(f"Unknown extract type: {extract_type}. Use 'futbol', 'cine', or 'series'")
+        raise ValueError(f"Unknown extract type: {extract_type}. Use 'futbol', 'cine', 'series', or 'vidhide'")
 
 
 def main() -> int:
@@ -55,7 +60,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Extract HLS URLs from futbol/cine/series embed pages",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
+epilog="""
 Examples:
   python -m extractors.main --type futbol --id fc-river-boca \\
        --url "https://tvf90.com/1.php?stream=sportv" --output /tmp/result.json
@@ -65,13 +70,16 @@ Examples:
 
   python -m extractors.main --type series --id cu-breaking-bad-s01e01 \\
        --url "https://gounlimited.to/embed/xyz123" --output /tmp/result.json
-        """,
+
+  python -m extractors.main --type vidhide --id test \\
+       --url "https://tungtungsahur.cuevana3k.pro/?token=1D0VEA0dMAQ1AVVdW" --output /tmp/test.json
+         """,
     )
     parser.add_argument(
         "--type",
-        choices=["futbol", "cine", "series"],
+        choices=["futbol", "cine", "series", "vidhide"],
         required=True,
-        help="Extraction type: futbol (tvf90), cine or series (cuevana hosts)",
+        help="Extraction type: futbol (tvf90), cine or series (cuevana hosts), vidhide (tungtungsahur/VidHide)",
     )
     parser.add_argument(
         "--id",
