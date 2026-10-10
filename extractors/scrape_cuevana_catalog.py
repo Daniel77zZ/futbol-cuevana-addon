@@ -77,8 +77,19 @@ def parse_movie_card(card: BeautifulSoup, base_url: str, content_type: str) -> O
             if detail_url and not detail_url.startswith("http"):
                 detail_url = urljoin(base_url, detail_url)
         
-        # Generate ID
-        slug = re.sub(r'[^a-z0-9]+', '-', f"{title}-{year}".lower()).strip('-')
+        # Extract slug from Cuevana's real detail URL (e.g., /pelicula/a-machu-picchu-proposal)
+        # This is the slug Cuevana actually uses, not a generated one from title+year
+        slug = ""
+        if detail_url:
+            # Extract slug from /pelicula/{slug} or /serie/{slug}
+            slug_match = re.search(r'/(?:pelicula|serie)/([^/?#]+)', detail_url)
+            if slug_match:
+                slug = slug_match.group(1)
+        
+        # Fallback: generate slug from title+year if extraction failed
+        if not slug:
+            slug = re.sub(r'[^a-z0-9]+', '-', f"{title}-{year}".lower()).strip('-')
+        
         prefix = "cu" if content_type == "movie" else "cu"
         content_id = f"{prefix}-{slug}"
         
