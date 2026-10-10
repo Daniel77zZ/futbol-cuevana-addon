@@ -173,11 +173,54 @@ async def scrape_cuevana_catalog(url: str, content_type: str) -> list:
 
 
 async def enrich_with_embed_urls(items: list, content_type: str) -> list:
-    """Enrich items by fetching detail pages to find embed URLs."""
-    # This is optional and can be slow. For now, we'll skip and let
-    # the on-demand resolver handle it.
-    for item in items:
-        item["sourceUrl"] = item.get("detailUrl", "")
+    """Enrich items by fetching detail pages to extract tungtungsahur embed URLs."""
+    import re
+    
+    async with httpx.AsyncClient(
+        headers={
+            "User-Agent": "Mozilla/5.0 (compatible; FutbolCuevanaBot/1.0)",
+            "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+        },
+        follow_redirects=True,
+        timeout=15.0,
+    ) as client:
+        for item in items:
+            detail_url = item.get("detailUrl", "")
+            if not detail_url:
+                continue
+            
+            try:
+                response = await client.get(detail_url, timeout=10.0, follow_redirects=True)
+                if not response.is_success:
+                    continue
+                
+                html = response.text
+                
+                # Extract tungtungsahur URLs from data-server attributes
+                # Pattern: data-server="https://tungtungsahur.cuevana3k.pro/?token=..."
+                patterns = [
+                    r'<li[^>]*data-server="([^"]*tungtungsahur[^"]*)"[^>]*>\s*<span[^>]*>Servidor\s+(?:Hyper|Nebula)[^<]*<\/span>\s*<span[^>]*>Reproducir<\/span>',
+                    r'<li[^>]*data-server="([^"]*tungtungsahur[^"]*)"[^>]*>',
+                    r'data-server="([^"]*tungtungsahur[^"]*)"',
+                ]
+                
+                tungtungsahur_url = None
+                for pattern in patterns:
+                    matches = re.findall(pattern, html, re.IGNORECASE)
+                    if matches:
+                        tungtungsahur_url = matches[0]
+                        break
+                
+                if tungtungsahur_url:
+                    item["embedUrl"] = tungtungsahur_url
+                else:
+                    # Fallback to detailUrl
+                    item["sourceUrl"] = item.get("detailUrl", "")
+                    
+            except Exception as e:
+                logger.debug("Failed to enrich %s: %s", item.get("id"), e)
+                item["sourceUrl"] = item.get("detailUrl", "")
+    
     return items
 
 
