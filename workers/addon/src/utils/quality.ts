@@ -62,3 +62,99 @@ export function qualityRank(quality?: string | null): number {
 export function sortByQuality<T extends { quality?: string | null }>(streams: readonly T[]): T[] {
   return [...streams].sort((a, b) => qualityRank(b.quality) - qualityRank(a.quality));
 }
+
+/**
+ * Parses an HLS master playlist (#EXT-X-STREAM-INF) and returns the highest
+ * variant's resolution (height in pixels) and bandwidth.
+ * Returns null if no valid variants are found.
+ */
+export function parseMasterPlaylist(playlist: string): { height: number; bandwidth: number } | null {
+  const lines = playlist.split("\n");
+  let bestHeight = 0;
+  let bestBandwidth = 0;
+  let currentResolution: string | null = null;
+  let currentBandwidth: number | null = null;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    
+    if (trimmed.startsWith("#EXT-X-STREAM-INF:")) {
+      // Parse RESOLUTION=WIDTHxHEIGHT and BANDWIDTH=bits
+      const resolutionMatch = trimmed.match(/RESOLUTION=(\d+)x(\d+)/i);
+      const bandwidthMatch = trimmed.match(/BANDWIDTH=(\d+)/i);
+      
+      if (resolutionMatch && resolutionMatch[1] && resolutionMatch[2]) {
+        currentResolution = resolutionMatch[0];
+        currentBandwidth = bandwidthMatch && bandwidthMatch[1] ? parseInt(bandwidthMatch[1], 10) : 0;
+      }
+    } else if (trimmed && !trimmed.startsWith("#") && currentResolution) {
+      // This is a variant URI line - we have the metadata from the previous line
+      const heightMatch = currentResolution.match(/x(\d+)$/i);
+      if (heightMatch && heightMatch[1]) {
+        const height = parseInt(heightMatch[1], 10);
+        const bandwidth = currentBandwidth ?? 0;
+        
+        if (height > bestHeight || (height === bestHeight && bandwidth > bestBandwidth)) {
+          bestHeight = height;
+          bestBandwidth = bandwidth;
+        }
+      }
+      // Reset for next variant
+      currentResolution = null;
+      currentBandwidth = null;
+    }
+  }
+
+  if (bestHeight > 0) {
+    return { height: bestHeight, bandwidth: bestBandwidth };
+  }
+  return null;
+}
+
+/**
+ * Fetches and parses an HLS master playlist with a timeout.
+ * Returns the canonical quality label from the highest variant, or null on failure.
+ * 
+ * @param url - The master playlist URL (must be http(s) and end with .m3u8)
+ * @param timeoutMs - Fetch timeout in milliseconds (default: 5000)
+ */
+export async function fetchTrueQuality(
+  url: string,
+  timeoutMs: number = 5000
+): Promise<string | null> {
+  // Only process http(s) URLs ending in .m3u8
+  if (!/^https?:\/\//i.test(url) || !/\.m3u8($|\?)/i.test(url)) {
+    return null;
+  }
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    
+    try {
+      const res = await fetch(url, {
+        headers: { Accept: "application/vnd.apple.mpegurl,*/*" },
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (!res.ok) {
+        return null;
+      }
+      
+      const text = await res.text();
+      const parsed = parseMasterPlaylist(text);
+      
+      if (parsed) {
+        return qualityFromHeight(parsed.height);
+      }
+      return null;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  } catch {
+    // Timeout, network error, or parse error - fail soft
+    return null;
+  }
+}

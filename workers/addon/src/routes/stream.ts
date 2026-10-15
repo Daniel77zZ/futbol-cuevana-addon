@@ -6,8 +6,8 @@ import { DecryptorClient, decryptorServersToStreams, type DecryptorServer } from
 import { TmdbClient, type TmdbRef } from "../clients/tmdb";
 import { CuevanaExtractor, type CuevanaStream } from "../extractors/cuevana";
 import { POLL_ATTEMPTS, POLL_INTERVAL_MS, isFresh, logInfo, sleep } from "../utils/cache";
-import { normalizeQuality, sortByQuality } from "../utils/quality";
-import { saveCandidates, type StreamCandidate } from "../utils/candidates";
+import { normalizeQuality, sortByQuality, fetchTrueQuality, qualityFromHeight, qualityRank } from "../utils/quality";
+import { saveCandidates, getCandidates, updateCandidateQuality, type StreamCandidate } from "../utils/candidates";
 
 export interface Stream extends SdkStream {
   url: string;
@@ -63,6 +63,13 @@ async function resolveTmdbId(env: Env, type: string, id: string): Promise<TmdbRe
 
 export async function resolveStreams(env: Env, type: string, id: string): Promise<Stream[]> {
   const kv = KvClient.fromEnv(env);
+
+  // 0. Serve-time ranking: try stored candidates first (F4)
+  const ranked = await rankAndResolveCandidates(env, type, id);
+  if (ranked.length > 0) {
+    console.log("DEBUG: Serving ranked candidates", { type, id, count: ranked.length });
+    return ranked;
+  }
 
   // 1. Check cache first (existing behavior)
   const cached = await kv.getStream(type, id);
@@ -259,6 +266,81 @@ function rewriteToProxy(url: string): string {
   }
   
   return url;
+}
+
+/**
+ * Source reliability ranking (higher = more reliable).
+ * decryptor/vidhide-native first (validated by upstream), then cuevana-native,
+ * then fallback resolver.
+ */
+function sourceRank(source: string): number {
+  switch (source) {
+    case "decryptor":
+    case "vidhide-native":
+      return 3;
+    case "cuevana-native":
+      return 2;
+    default:
+      return 1;
+  }
+}
+
+/**
+ * Resolves true quality for candidates and ranks them for serving.
+ * Ranking: true resolution desc → source reliability → freshness (ts desc).
+ * Returns the full ordered fallback list.
+ */
+async function rankAndResolveCandidates(
+  env: Env,
+  type: string,
+  id: string,
+): Promise<Stream[]> {
+  const candidates = await getCandidates(env, type, id);
+  if (!candidates.length) return [];
+
+  // Resolve true quality for each candidate (parallel, with timeout)
+  const resolved = await Promise.all(
+    candidates.map(async (c) => {
+      let trueQuality = c.quality;
+      
+      // Only fetch master playlist for HLS URLs
+      if (/\.m3u8($|\?)/i.test(c.url)) {
+        const fetchedQuality = await fetchTrueQuality(c.url);
+        if (fetchedQuality && fetchedQuality !== "auto") {
+          trueQuality = fetchedQuality;
+          // Cache the resolved quality back (best-effort)
+          await updateCandidateQuality(env, type, id, c.url, c.source, trueQuality);
+        }
+      }
+
+      return {
+        ...c,
+        trueQuality,
+        trueQualityRank: qualityRank(trueQuality),
+      };
+    })
+  );
+
+  // Rank: true resolution desc → source reliability → freshness (ts desc)
+  resolved.sort((a, b) => {
+    // 1. True quality (resolution) descending
+    if (b.trueQualityRank !== a.trueQualityRank) {
+      return b.trueQualityRank - a.trueQualityRank;
+    }
+    // 2. Source reliability (decryptor/vidhide-native first)
+    const sourceDiff = sourceRank(b.source) - sourceRank(a.source);
+    if (sourceDiff !== 0) return sourceDiff;
+    // 3. Freshness (newer first)
+    return b.ts - a.ts;
+  });
+
+  // Convert to Stream format for Stremio
+  return resolved.map((c) => ({
+    url: rewriteToProxy(c.url),
+    name: `${sourceLabel(id)} · ${c.source}`,
+    title: c.trueQuality,
+    quality: c.trueQuality,
+  }));
 }
 
 export function sourceLabel(id: string): string {

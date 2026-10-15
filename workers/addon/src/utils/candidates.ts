@@ -96,3 +96,41 @@ export async function getCandidates(
   const key = candidatesKey(type, id);
   return (await kv.getJson<StreamCandidate[]>(key)) ?? [];
 }
+
+/**
+ * Updates a candidate's quality label in the stored candidates.
+ * Best-effort write - never throws, logs errors silently.
+ * Used to cache the true quality resolved from master playlist.
+ */
+export async function updateCandidateQuality(
+  env: Env,
+  type: string,
+  id: string,
+  candidateUrl: string,
+  source: string,
+  trueQuality: string,
+): Promise<void> {
+  try {
+    const kv = KvClient.fromEnv(env);
+    const key = candidatesKey(type, id);
+    const candidates = (await kv.getJson<StreamCandidate[]>(key)) ?? [];
+    
+    const fingerprint = `${candidateUrl}|${source}`;
+    const index = candidates.findIndex(c => `${c.url}|${c.source}` === fingerprint);
+    
+    if (index >= 0) {
+      const existing = candidates[index]!;
+      candidates[index] = {
+        url: existing.url,
+        source: existing.source,
+        quality: trueQuality,
+        ts: existing.ts,
+        embedUrl: existing.embedUrl,
+        signatureParams: existing.signatureParams,
+      };
+      await kv.putJson(key, candidates, CANDIDATES_TTL_SECONDS);
+    }
+  } catch {
+    // Best-effort cache update - never fail the request on write errors
+  }
+}
