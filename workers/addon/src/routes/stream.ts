@@ -7,6 +7,7 @@ import { TmdbClient, type TmdbRef } from "../clients/tmdb";
 import { CuevanaExtractor, type CuevanaStream } from "../extractors/cuevana";
 import { POLL_ATTEMPTS, POLL_INTERVAL_MS, isFresh, logInfo, sleep } from "../utils/cache";
 import { normalizeQuality, sortByQuality } from "../utils/quality";
+import { saveCandidates, type StreamCandidate } from "../utils/candidates";
 
 export interface Stream extends SdkStream {
   url: string;
@@ -106,6 +107,17 @@ export async function resolveStreams(env: Env, type: string, id: string): Promis
         quality: normalizeQuality(s.quality),
       }));
       console.log("DEBUG: Cuevana native streams found", { type, id, count: streams.length });
+      
+      // Persist all candidates for serve-time ranking (F3)
+      const candidates: StreamCandidate[] = result.streams.map((s) => ({
+        url: s.url,
+        source: "cuevana-native",
+        quality: normalizeQuality(s.quality),
+        ts: Date.now(),
+        embedUrl: s.url, // The original URL before proxy rewrite
+      }));
+      await saveCandidates(env, type, id, candidates);
+      
       return sortByQuality(streams);
     }
     
@@ -142,6 +154,19 @@ export async function resolveStreams(env: Env, type: string, id: string): Promis
           url: rewriteToProxy(s.url),
         }));
         console.log("DEBUG: Decryptor streams found", { type, id, count: streams.length });
+        
+        // Persist all candidates for serve-time ranking (F3)
+        const candidates: StreamCandidate[] = servers
+          .filter((s) => s.proxyUrl && s.type === "hls")
+          .map((server) => ({
+            url: server.proxyUrl,
+            source: "decryptor",
+            quality: normalizeQuality(server.quality),
+            ts: Date.now(),
+            embedUrl: server.proxyUrl,
+          }));
+        await saveCandidates(env, type, id, candidates);
+        
         return sortByQuality(streams);
       }
     }

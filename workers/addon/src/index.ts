@@ -14,7 +14,7 @@ import { generateManifest } from "./manifest";
 import { getCatalog } from "./routes/catalog";
 import { getMeta } from "./routes/meta";
 import { resolveStreams } from "./routes/stream";
-import { debugCatalog, debugStream } from "./routes/debug";
+import { debugCatalog, debugStream, debugCandidates } from "./routes/debug";
 import { logError } from "./utils/cache";
 
 /** Bindings, vars and secrets available to the Worker (see wrangler.toml). */
@@ -31,6 +31,8 @@ export interface Env {
   GH_WORKFLOW: string;
   /** Branch/ref the workflow runs on. Defaults to "main". */
   GH_REF?: string;
+  /** Decryptor API base URL (e.g., https://your-decryptor.railway.app). */
+  DECRYPTOR_BASE_URL?: string;
 }
 
 const CORS_HEADERS: Record<string, string> = {
@@ -69,6 +71,11 @@ export default {
 
     const { pathname } = new URL(request.url);
 
+    // Handle video proxy for CDN URLs that require session/headers
+    if (pathname.startsWith("/proxy/video/")) {
+      return handleVideoProxy(request);
+    }
+
     try {
       if (pathname === "/" || pathname === "/manifest.json") {
         return jsonResponse(generateManifest());
@@ -85,6 +92,19 @@ export default {
         }
         if (debugType === "stream") {
           return jsonResponse(await debugStream(env, debugType, debugId));
+        }
+        if (debugType === "candidates") {
+          const type = debugSegments[1] || "movie";
+          const id = debugSegments[2] || "";
+          if (!id) return errorResponse("Missing id", 400);
+          return jsonResponse(await debugCandidates(env, type, id));
+        }
+        if (debugType === "vidhide-v2") {
+          const type = debugSegments[1] || "tv";
+          const tmdbId = debugSegments[2] || "";
+          if (!tmdbId) return errorResponse("Missing tmdbId", 400);
+          const { debugVidHideV2 } = await import("./routes/debug");
+          return jsonResponse(await debugVidHideV2(env, type, tmdbId));
         }
         return errorResponse("Not found", 404);
       }
@@ -171,5 +191,95 @@ function safeDecode(value: string): string {
     return decodeURIComponent(value);
   } catch {
     return value;
+  }
+}
+
+/**
+ * Video proxy handler for CDN URLs that require session cookies/headers.
+ * Proxies requests to CDN (flood.sourcerrr.online, sacdn.hakunaymatata.com, etc.)
+ * with the original client's headers (Referer, Origin, Cookie, User-Agent, Range).
+ * 
+ * Usage: /proxy/video/?url=https://cdn.example.com/path
+ */
+async function handleVideoProxy(request: Request): Promise<Response> {
+  const url = new URL(request.url);
+  
+  // Get target URL from query parameter (cleaner than path encoding)
+  const targetUrl = url.searchParams.get("url");
+  
+  if (!targetUrl) {
+    return new Response("Missing target URL (use ?url=...)", { status: 400 });
+  }
+  
+  try {
+    // Validate target is a known CDN domain (security)
+    const targetHost = new URL(targetUrl).hostname;
+    const allowedDomains = [
+      "flood.sourcerrr.online",
+      "sacdn.hakunaymatata.com",
+      "noon.mooncase.online",
+      "cloudorchestranova.com",
+    ];
+    
+    if (!allowedDomains.some(d => targetHost.includes(d))) {
+      return new Response("CDN domain not allowed", { status: 403 });
+    }
+    
+    // Build headers to forward to CDN
+    const headers = new Headers();
+    
+    // Forward critical headers from original request
+    const forwardHeaders = [
+      "referer",
+      "origin", 
+      "cookie",
+      "user-agent",
+      "range",           // For video seeking
+      "accept",
+      "accept-language",
+      "accept-encoding",
+    ];
+    
+    for (const h of forwardHeaders) {
+      const value = request.headers.get(h);
+      if (value) headers.set(h, value);
+    }
+    
+    // Set Referer/Origin to CDN base if not provided
+    if (!headers.has("referer")) {
+      headers.set("referer", "https://vidlink.pro/");
+    }
+    if (!headers.has("origin")) {
+      headers.set("origin", "https://vidlink.pro");
+    }
+    
+    // Forward the request to CDN
+    const response = await fetch(targetUrl, {
+      method: request.method,
+      headers,
+      redirect: "follow",
+    });
+    
+    // Stream the response back with CORS headers
+    const responseHeaders = new Headers(response.headers);
+    responseHeaders.set("Access-Control-Allow-Origin", "*");
+    responseHeaders.set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+    responseHeaders.set("Access-Control-Allow-Headers", "Range, Content-Type, Authorization");
+    responseHeaders.set("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges");
+    responseHeaders.set("Accept-Ranges", "bytes");
+    
+    // Remove problematic headers
+    responseHeaders.delete("content-security-policy");
+    responseHeaders.delete("x-frame-options");
+    
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: responseHeaders,
+    });
+    
+  } catch (err) {
+    console.error("Video proxy error:", err);
+    return new Response("Proxy error", { status: 502 });
   }
 }
