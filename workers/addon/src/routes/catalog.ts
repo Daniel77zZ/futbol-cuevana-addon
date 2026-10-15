@@ -15,7 +15,10 @@ export async function getCatalog(
   extra: Record<string, string> = {},
 ): Promise<MetaPreview[]> {
   const kv = KvClient.fromEnv(env);
-  const items = await kv.getCatalog(type, id);
+  const key = `catalog:${type}:${id}`;
+  console.log("DEBUG: getCatalog reading key", key);
+  const items = await kv.getJson<CatalogItem[]>(key);
+  console.log("DEBUG: getCatalog result", { key, itemsLength: items?.length, itemsNull: items === null });
   if (!items || items.length === 0) {
     logInfo("catalog_empty", { type, id });
     return [];

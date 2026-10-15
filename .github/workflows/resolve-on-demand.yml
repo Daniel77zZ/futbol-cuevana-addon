@@ -28,6 +28,10 @@ permissions:
         required: false
         type: boolean
         default: false
+      stream_type:
+        description: 'Stream type for vidhide target (movie|series)'
+        required: false
+        type: string
 
 jobs:
   resolve:
@@ -115,7 +119,7 @@ jobs:
             futbol) STREAM_TYPE="tv" ;;
             cine)   STREAM_TYPE="movie" ;;
             series) STREAM_TYPE="series" ;;
-            vidhide) STREAM_TYPE="tv" ;;  # vidhide can be used for both TV and movies, default to tv
+            vidhide) STREAM_TYPE="${{ inputs.stream_type }}" ;;  # explicit type passed from worker
             *)      echo "::error::Invalid target: $TARGET"; exit 1 ;;
           esac
           curl -X PUT "https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/storage/kv/namespaces/${CF_KV_NAMESPACE_ID}/values/stream:${STREAM_TYPE}:${CONTENT_ID}" \

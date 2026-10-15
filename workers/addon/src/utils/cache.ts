@@ -12,9 +12,9 @@ export const STREAM_MAX_AGE_MS = STREAM_TTL_SECONDS * 1000;
 /** Catalogs are refreshed once a day by `daily-catalog.yml`. */
 export const CATALOG_TTL_SECONDS = 24 * 60 * 60;
 
-/** On-demand resolution polling: 15 attempts * 2s = 30s budget. */
-export const POLL_ATTEMPTS = 15;
-export const POLL_INTERVAL_MS = 2000;
+/** On-demand resolution polling: 60 attempts * 3s = 180s budget (3 min). */
+export const POLL_ATTEMPTS = 60;
+export const POLL_INTERVAL_MS = 3000;
 
 export function streamKey(type: string, id: string): string {
   return `stream:${type}:${id}`;

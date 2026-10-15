@@ -70,6 +70,7 @@ export class KvClient {
   async getJson<T>(key: string): Promise<T | null> {
     try {
       const value = await this.kv.get<T>(key, "json");
+      console.log("DEBUG: KV getJson", { key, valueNull: value === null, valueLength: value?.length, firstItemEmbedUrl: (value as any)?.[0]?.embedUrl });
       return value ?? null;
     } catch (err) {
       logError("kv_get_failed", { key, error: String(err) });
