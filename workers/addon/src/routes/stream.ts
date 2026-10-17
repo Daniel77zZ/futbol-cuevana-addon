@@ -4,7 +4,8 @@ import { triggerResolveWorkflow } from "../clients/github";
 import { KvClient, type StreamCache } from "../clients/kv";
 import { DecryptorClient, decryptorServersToStreams, type DecryptorServer } from "../clients/decryptor";
 import { TmdbClient, type TmdbRef } from "../clients/tmdb";
-import { CuevanaExtractor, type CuevanaStream } from "../extractors/cuevana";
+import { extractCuevanaServers, buildCuevanaPageUrl, type CuevanaServer } from "../extractors/cuevana";
+import { MediaFlowClient, MEDIAFLOW_HOSTS, type MediaFlowHost } from "../clients/mediaflow";
 import { POLL_ATTEMPTS, POLL_INTERVAL_MS, isFresh, logInfo, sleep } from "../utils/cache";
 import { normalizeQuality, sortByQuality, fetchTrueQuality, qualityFromHeight, qualityRank } from "../utils/quality";
 import { saveCandidates, getCandidates, updateCandidateQuality, type StreamCandidate } from "../utils/candidates";
@@ -15,9 +16,12 @@ export interface Stream extends SdkStream {
   quality: string;
 }
 
+/** Live Cuevana domain. The previous one (`cuevana3k.pro`) rotated away. */
+const CUEVANA_BASE = "https://cuevana3r.pro";
+
 const SOURCES: Record<string, { label: string; base: string }> = {
   fc: { label: "Fútbol Libre", base: "https://www.futbollibre.tv" },
-  cu: { label: "Cuevana", base: "https://cuevana3k.pro" },
+  cu: { label: "Cuevana", base: CUEVANA_BASE },
 };
 
 /**
@@ -77,59 +81,36 @@ export async function resolveStreams(env: Env, type: string, id: string): Promis
     return sortByQuality([toStream(id, cached)]);
   }
 
-  // 2. Handle Cuevana (cu-*) via GitHub Actions with VidHide extractor
+  // 2. Handle Cuevana (cu-*) through the MediaFlow Proxy
   if (id.startsWith("cu-")) {
     const cuevanaId = id.slice(3); // Remove "cu-" prefix
-    
-    // For cu-* IDs, we need to fetch the Cuevana page to get tungtungsahur embed URLs
-    // Then dispatch to GitHub Actions with vidhide extractor
-    const embedUrl = await getCuevanaVidHideEmbedUrl(cuevanaId, type);
-    if (embedUrl) {
-      console.log("DEBUG: Dispatching cu-* to GitHub Actions with VidHide", { type, id, embedUrl });
-      
-      // Determine target for GitHub Actions: cine for movies, series for TV
-      const target = type === "movie" ? "cine" : "series";
-      await triggerResolveWorkflow(env, { 
-        target: "vidhide",  // Use vidhide extractor type
-        id, 
-        url: embedUrl,
-        stream_type: type  // Pass explicit type (movie|series) for correct KV key
-      });
+    const mediaflow = MediaFlowClient.fromEnv(env);
 
-      const resolved = await pollForStream(kv, type, id);
-      if (resolved) {
-        return sortByQuality([toStream(id, resolved)]);
+    if (!mediaflow) {
+      logInfo("mediaflow_unconfigured", { type, id });
+    } else {
+      const pageUrl = buildCuevanaPageUrl(CUEVANA_BASE, cuevanaId, type);
+      console.log("DEBUG: Fetching Cuevana page", { pageUrl });
+
+      const { servers, error } = await extractCuevanaServers(pageUrl);
+      if (error) console.warn("Cuevana page extraction failed", { id, error });
+
+      const streams = await resolveCuevanaViaMediaFlow(mediaflow, servers);
+      if (streams.length > 0) {
+        console.log("DEBUG: MediaFlow streams found", { type, id, count: streams.length });
+
+        // Persist candidates for serve-time ranking (F3)
+        const candidates: StreamCandidate[] = streams.map((s, index) => ({
+          url: s.url,
+          source: "mediaflow",
+          quality: s.quality,
+          ts: Date.now() - index, // preserve the extraction preference order
+          embedUrl: s.embedUrl,
+        }));
+        await saveCandidates(env, type, id, candidates);
+
+        return sortByQuality(streams);
       }
-    }
-    
-    // Fallback to Cuevana native extractor if no tungtungsahur URL found
-    const extractor = new CuevanaExtractor();
-    const result = await extractor.extract(cuevanaId);
-    
-    if (result.streams.length > 0) {
-      const streams = result.streams.map((s) => ({
-        url: rewriteToProxy(s.url),
-        name: s.name,
-        title: normalizeQuality(s.quality),
-        quality: normalizeQuality(s.quality),
-      }));
-      console.log("DEBUG: Cuevana native streams found", { type, id, count: streams.length });
-      
-      // Persist all candidates for serve-time ranking (F3)
-      const candidates: StreamCandidate[] = result.streams.map((s) => ({
-        url: s.url,
-        source: "cuevana-native",
-        quality: normalizeQuality(s.quality),
-        ts: Date.now(),
-        embedUrl: s.url, // The original URL before proxy rewrite
-      }));
-      await saveCandidates(env, type, id, candidates);
-      
-      return sortByQuality(streams);
-    }
-    
-    if (result.error) {
-      console.warn("Cuevana native extractor failed", { id, error: result.error });
     }
   }
 
@@ -368,106 +349,61 @@ interface CatalogItem {
   embedUrl?: string;
 }
 
-/**
- * Fetches a Cuevana page and extracts the first tungtungsahur embed URL
- * for the given language preference (Castellano > Latino > Subtitulado).
- */
-async function getCuevanaVidHideEmbedUrl(cuevanaId: string, type: string): Promise<string | null> {
-  try {
-    // Determine the Cuevana URL based on type and ID
-    const baseUrl = "https://cuevana3k.pro";
-    let url: string;
-    
-    if (type === "movie") {
-      url = `${baseUrl}/pelicula/${cuevanaId}`;
-    } else {
-      // For series/TV, the ID format might be "spider-noir/episodio-1x4"
-      url = `${baseUrl}/serie/${cuevanaId}`;
-    }
+/** Max extraction attempts per Cuevana page: 2 servers x 2 hosts, capped. */
+const MAX_MEDIAFLOW_ATTEMPTS = 4;
+const MEDIAFLOW_VALIDATE_TIMEOUT_MS = 8_000;
 
-    console.log("DEBUG: Fetching Cuevana page for VidHide URL", { url });
-    
-    // Fetch with 10s timeout
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
-    
-    let res: Response;
-    try {
-      res = await fetch(url, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        },
-        redirect: "follow",
-        signal: controller.signal,
-      });
-    } finally {
-      clearTimeout(timeoutId);
-    }
-
-    if (!res.ok) {
-      console.warn("Failed to fetch Cuevana page", { url, status: res.status });
-      return null;
-    }
-
-    const html = await res.text();
-    
-    // Extract tungtungsahur URLs from data-server attributes
-    // Pattern: data-server="https://tungtungsahur.cuevana3k.pro/?token=..."
-    // Priority: Castellano > Latino > Subtitulado
-    // HTML structure: <li role="presentation" data-server="..."><span>Servidor Hyper</span><span>Reproducir</span>
-    
-    // Pattern 1: Look for tungtungsahur URLs in data-server attributes near "Servidor Hyper/Nebula" and "Reproducir"
-    const pattern1 = /<li[^>]*data-server="([^"]*tungtungsahur[^"]*)"[^>]*>\s*<span[^>]*>Servidor\s+(?:Hyper|Nebula)[^<]*<\/span>\s*<span[^>]*>Reproducir<\/span>/gi;
-    
-    // Pattern 2: Any tungtungsahur URL in data-server attribute (fallback)
-    const pattern2 = /<li[^>]*data-server="([^"]*tungtungsahur[^"]*)"[^>]*>/gi;
-    
-    // Pattern 3: Any tungtungsahur URL in data-server attribute (broad fallback)
-    const pattern3 = /data-server="([^"]*tungtungsahur[^"]*)"/gi;
-
-    const patterns = [pattern1, pattern2, pattern3];
-
-    for (const pattern of patterns) {
-      let match: RegExpExecArray | null;
-      while ((match = pattern.exec(html)) !== null) {
-        const tungtungsahurUrl = match[1];
-        if (tungtungsahurUrl && tungtungsahurUrl.includes("tungtungsahur")) {
-          console.log("DEBUG: Found tungtungsahur URL", { tungtungsahurUrl });
-          return tungtungsahurUrl;
-        }
-      }
-    }
-
-    // Also check for base64 encoded URLs in data-server (?v=...)
-    const base64Pattern = /data-server="[^"]*\?v=([^"&]+)/gi;
-    let match: RegExpExecArray | null;
-    while ((match = base64Pattern.exec(html)) !== null) {
-      const encoded = match[1];
-      if (!encoded) continue;
-      try {
-        const decoded = atob(encoded);
-        if (decoded.includes("tungtungsahur")) {
-          console.log("DEBUG: Found tungtungsahur URL via base64", { decoded });
-          return decoded;
-        }
-      } catch (e) {
-        // Ignore decode errors
-      }
-    }
-
-    return null;
-  } catch (err) {
-    console.warn("Failed to extract tungtungsahur URL", { cuevanaId, error: err instanceof Error ? err.message : String(err) });
-    return null;
-  }
+/** A resolved Cuevana stream, keeping the provenance its candidate entry needs. */
+interface ResolvedCuevanaStream extends Stream {
+  embedUrl: string;
+  host: string;
+  serverIndex: string;
 }
 
-interface CatalogItem {
-  id: string;
-  name: string;
-  type: "movie" | "series" | "tv";
-  poster: string;
-  description?: string;
-  embedUrl?: string;
+/**
+ * Validates each (server, host) pair against MediaFlow and returns the playable
+ * ones in a deterministic order: document order first, then host preference.
+ * Only validated streams are advertised, so the user never sees a dead source.
+ */
+async function resolveCuevanaViaMediaFlow(
+  mediaflow: MediaFlowClient,
+  servers: CuevanaServer[],
+): Promise<ResolvedCuevanaStream[]> {
+  const attempts: Array<{ server: CuevanaServer; host: MediaFlowHost }> = [];
+  for (const server of servers) {
+    for (const host of MEDIAFLOW_HOSTS) {
+      if (attempts.length >= MAX_MEDIAFLOW_ATTEMPTS) break;
+      attempts.push({ server, host });
+    }
+    if (attempts.length >= MAX_MEDIAFLOW_ATTEMPTS) break;
+  }
+  if (attempts.length === 0) return [];
+
+  const checked = await Promise.all(
+    attempts.map(async (attempt) => {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), MEDIAFLOW_VALIDATE_TIMEOUT_MS);
+      try {
+        const ok = await mediaflow.validate(attempt.server.embedUrl, attempt.host, controller.signal);
+        return ok ? attempt : null;
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    }),
+  );
+
+  const streams: ResolvedCuevanaStream[] = [];
+  for (const attempt of checked) {
+    if (!attempt) continue;
+    streams.push({
+      url: mediaflow.buildStreamUrl(attempt.server.embedUrl, attempt.host),
+      name: `Cuevana · ${attempt.server.label}`,
+      title: "auto",
+      quality: "auto",
+      embedUrl: attempt.server.embedUrl,
+      host: attempt.host,
+      serverIndex: attempt.server.serverIndex,
+    });
+  }
+  return streams;
 }

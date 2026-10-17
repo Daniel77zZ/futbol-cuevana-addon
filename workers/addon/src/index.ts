@@ -33,6 +33,10 @@ export interface Env {
   GH_REF?: string;
   /** Decryptor API base URL (e.g., https://your-decryptor.railway.app). */
   DECRYPTOR_BASE_URL?: string;
+  /** MediaFlow Proxy base URL (e.g., https://mediaflow.example.com). */
+  MEDIAFLOW_BASE?: string;
+  /** MediaFlow Proxy API password (secret), when the instance enforces one. */
+  MEDIAFLOW_API_PASSWORD?: string;
 }
 
 const CORS_HEADERS: Record<string, string> = {
@@ -98,13 +102,6 @@ export default {
           const id = debugSegments[2] || "";
           if (!id) return errorResponse("Missing id", 400);
           return jsonResponse(await debugCandidates(env, type, id));
-        }
-        if (debugType === "vidhide-v2") {
-          const type = debugSegments[1] || "tv";
-          const tmdbId = debugSegments[2] || "";
-          if (!tmdbId) return errorResponse("Missing tmdbId", 400);
-          const { debugVidHideV2 } = await import("./routes/debug");
-          return jsonResponse(await debugVidHideV2(env, type, tmdbId));
         }
         return errorResponse("Not found", 404);
       }
