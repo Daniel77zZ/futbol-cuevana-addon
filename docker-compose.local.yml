@@ -86,9 +86,9 @@ services:
       - local-dev
 
   # MediaFlow Proxy -- extraction + playback engine for the Cuevana path.
-  # Same pinned image as deploy/mediaflow/fly.toml so local runs match the
-  # deployed one. No Playwright/Chromium is involved, so the slim upstream image
-  # is enough.
+  # Same pinned image as deploy/mediaflow/docker-compose.yml so local runs match
+  # the deployed one. No Playwright/Chromium is involved, so the slim upstream
+  # image is enough.
   mediaflow:
     image: mhdzumair/mediaflow-proxy:v2.4.9
     container_name: futbol-mediaflow

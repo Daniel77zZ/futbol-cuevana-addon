@@ -1,0 +1,70 @@
+# MediaFlow Proxy + Caddy for a single DigitalOcean droplet.
+#
+# One command brings up the whole host: Caddy terminates TLS on 443 and proxies to
+# MediaFlow, which is never published directly. Only Caddy has ports on the host,
+# so MediaFlow cannot be reached without going through TLS.
+#
+# The published upstream image is used instead of building from source: no local
+# Docker is required to prepare this directory, and upstream ships multi-arch
+# images. The tag is pinned on purpose -- `latest` is not a version.
+#
+# See README.md in this directory for the full procedure.
+
+name: mediaflow
+
+services:
+  mediaflow:
+    image: mhdzumair/mediaflow-proxy:v2.4.9
+    restart: unless-stopped
+    environment:
+      PORT: "8888"
+
+      # Upstream's own docker-compose.yml sets this, and the uvicorn docs say to
+      # pass --forwarded-allow-ips "*" whenever the server is not accessed
+      # directly. The image's CMD defaults it to 127.0.0.1, which is wrong here:
+      # the connection originates from Caddy, not from 127.0.0.1, so the
+      # forwarded headers (X-Forwarded-Proto and friends) would be ignored.
+      FORWARDED_ALLOW_IPS: "*"
+
+      # With no Redis attached, each worker keeps a private extractor/segment
+      # cache and re-does the same extraction instead of sharing a result. One
+      # worker is the coherent choice on a 1-2GB droplet; more only helps once
+      # Redis exists.
+      GUNICORN_WORKERS: "1"
+
+      # Public endpoint: close the admin surfaces the image exposes by default.
+      DISABLE_HOME_PAGE: "true"
+      DISABLE_DOCS: "true"
+      DISABLE_SPEEDTEST: "true"
+
+      # `:?` makes compose refuse to start when this is unset. On a public host an
+      # open MediaFlow is an open proxy that spends your bandwidth, so a loud
+      # failure is the correct default. The value lives in .env (gitignored).
+      API_PASSWORD: ${API_PASSWORD:?API_PASSWORD is not set -- copy .env.example to .env}
+
+    expose:
+      - "8888"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # The hostname Caddy obtains a Let's Encrypt certificate for. With no domain
+      # of your own, use the droplet IP in sslip.io form, e.g. 203.0.113.10.sslip.io
+      # -- sslip.io resolves any such name back to the IP embedded in it.
+      MEDIAFLOW_DOMAIN: ${MEDIAFLOW_DOMAIN:?MEDIAFLOW_DOMAIN is not set -- copy .env.example to .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - mediaflow
+
+volumes:
+  # Certificates and ACME account state. Deleting this volume re-requests
+  # certificates on the next start and can hit Let's Encrypt rate limits.
+  caddy_data:
+  caddy_config:

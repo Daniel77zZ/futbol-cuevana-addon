@@ -1,0 +1,19 @@
+# Caddy terminates TLS for MediaFlow.
+#
+# {$MEDIAFLOW_DOMAIN} is substituted from the environment (see docker-compose.yml
+# and .env). Caddy obtains and renews the certificate automatically over the ACME
+# HTTP-01 challenge, which is why port 80 must stay reachable.
+#
+# Nothing else is configured deliberately: every request goes to MediaFlow. There
+# is no static site and no admin surface to expose.
+
+{$MEDIAFLOW_DOMAIN} {
+	encode gzip
+
+	reverse_proxy mediaflow:8888 {
+		# MediaFlow streams HLS segments through this proxy. Buffering is
+		# disabled so Caddy does not hold segments in memory on a small droplet
+		# where ffmpeg is already the main consumer.
+		flush_interval -1
+	}
+}
