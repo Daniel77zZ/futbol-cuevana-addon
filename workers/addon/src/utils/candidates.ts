@@ -11,7 +11,7 @@ import { KvClient } from "../clients/kv";
 export interface StreamCandidate {
   /** Direct HLS/HTTP URL to play. */
   url: string;
-  /** Source identifier (e.g., "cuevana-native", "decryptor", "vidhide"). */
+  /** Source identifier (e.g., "decryptor", "mediaflow"). */
   source: string;
   /** Normalized quality label (e.g., "1080p", "720p", "hd"). */
   quality: string;

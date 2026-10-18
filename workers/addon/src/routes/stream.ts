@@ -81,37 +81,47 @@ export async function resolveStreams(env: Env, type: string, id: string): Promis
     return sortByQuality([toStream(id, cached)]);
   }
 
-  // 2. Handle Cuevana (cu-*) through the MediaFlow Proxy
+  // 2. Handle Cuevana (cu-*) through the MediaFlow Proxy.
+  //
+  // This branch is terminal on purpose. Cuevana has no legitimate fallback in the
+  // resolver workflow: the catalog embedUrl would be built from the dash-split id
+  // (which drops the /pelicula/ or /serie/ segment), and pollForStream would then
+  // hang the client for POLL_ATTEMPTS * POLL_INTERVAL_MS with no chance of success.
+  // An honest empty list is cheaper and faster than a doomed 3-minute poll.
   if (id.startsWith("cu-")) {
-    const cuevanaId = id.slice(3); // Remove "cu-" prefix
     const mediaflow = MediaFlowClient.fromEnv(env);
 
     if (!mediaflow) {
       logInfo("mediaflow_unconfigured", { type, id });
-    } else {
-      const pageUrl = buildCuevanaPageUrl(CUEVANA_BASE, cuevanaId, type);
-      console.log("DEBUG: Fetching Cuevana page", { pageUrl });
-
-      const { servers, error } = await extractCuevanaServers(pageUrl);
-      if (error) console.warn("Cuevana page extraction failed", { id, error });
-
-      const streams = await resolveCuevanaViaMediaFlow(mediaflow, servers);
-      if (streams.length > 0) {
-        console.log("DEBUG: MediaFlow streams found", { type, id, count: streams.length });
-
-        // Persist candidates for serve-time ranking (F3)
-        const candidates: StreamCandidate[] = streams.map((s, index) => ({
-          url: s.url,
-          source: "mediaflow",
-          quality: s.quality,
-          ts: Date.now() - index, // preserve the extraction preference order
-          embedUrl: s.embedUrl,
-        }));
-        await saveCandidates(env, type, id, candidates);
-
-        return sortByQuality(streams);
-      }
+      return [];
     }
+
+    const cuevanaId = id.slice(3); // Remove "cu-" prefix
+    const pageUrl = buildCuevanaPageUrl(CUEVANA_BASE, cuevanaId, type);
+    console.log("DEBUG: Fetching Cuevana page", { pageUrl });
+
+    const { servers, error } = await extractCuevanaServers(pageUrl);
+    if (error) console.warn("Cuevana page extraction failed", { id, error });
+
+    const streams = await resolveCuevanaViaMediaFlow(mediaflow, servers);
+    if (streams.length === 0) {
+      logInfo("cuevana_unresolved", { type, id, servers: servers.length });
+      return [];
+    }
+
+    console.log("DEBUG: MediaFlow streams found", { type, id, count: streams.length });
+
+    // Persist candidates for serve-time ranking (F3)
+    const candidates: StreamCandidate[] = streams.map((s, index) => ({
+      url: s.url,
+      source: "mediaflow",
+      quality: s.quality,
+      ts: Date.now() - index, // preserve the extraction preference order
+      embedUrl: s.embedUrl,
+    }));
+    await saveCandidates(env, type, id, candidates);
+
+    return sortByQuality(streams);
   }
 
   // 3. Try Decryptor if TMDB ID is resolvable and DECRYPTOR_BASE_URL is configured
@@ -251,15 +261,15 @@ function rewriteToProxy(url: string): string {
 
 /**
  * Source reliability ranking (higher = more reliable).
- * decryptor/vidhide-native first (validated by upstream), then cuevana-native,
- * then fallback resolver.
+ * decryptor (validated upstream) first, then mediaflow (Cuevaana via MediaFlow Proxy).
+ * Retired sources (vidhide-native, cuevana-native) fall to the default rank so stale
+ * KV candidates cannot outrank a stream we just resolved successfully.
  */
 function sourceRank(source: string): number {
   switch (source) {
     case "decryptor":
-    case "vidhide-native":
       return 3;
-    case "cuevana-native":
+    case "mediaflow":
       return 2;
     default:
       return 1;
@@ -308,7 +318,7 @@ async function rankAndResolveCandidates(
     if (b.trueQualityRank !== a.trueQualityRank) {
       return b.trueQualityRank - a.trueQualityRank;
     }
-    // 2. Source reliability (decryptor/vidhide-native first)
+    // 2. Source reliability (decryptor first, then mediaflow)
     const sourceDiff = sourceRank(b.source) - sourceRank(a.source);
     if (sourceDiff !== 0) return sourceDiff;
     // 3. Freshness (newer first)
