@@ -1,0 +1,84 @@
+# Answers one question: does the Cuevana -> MediaFlow path work from a
+# datacenter IP?
+#
+# The local end-to-end test ran from a residential IP. Every candidate public
+# host is a datacenter IP, and some CDNs refuse those. Rather than rent a server
+# to find out, this runs the real engine on a GitHub-hosted runner -- itself a
+# datacenter IP -- and exercises the real path end to end.
+#
+# Manual only on purpose. It is a diagnostic, not part of the pipeline.
+#
+# Free to run: no signup, no card, no cloud account.
+
+name: Probe MediaFlow from a datacenter IP
+
+permissions:
+  contents: read
+
+'on':
+  workflow_dispatch:
+    inputs:
+      slug:
+        description: 'Cuevana movie slug, without the cu- prefix'
+        required: false
+        default: 'apuntes-para-una-ficcion-consentida'
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # No colon inside the echo: a bare ": " in a plain YAML scalar is parsed as
+      # a mapping indicator and breaks the file.
+      - name: Record the runner's egress IP
+        run: echo "runner egress IP = $(curl -s --max-time 10 https://api.ipify.org || echo unknown)"
+
+      - name: Start MediaFlow
+        run: |
+          set -eu
+          PASSWORD="$(openssl rand -hex 12)"
+          echo "API_PASSWORD=${PASSWORD}" >> "$GITHUB_ENV"
+
+          docker run -d --name mediaflow \
+            -p 127.0.0.1:8888:8888 \
+            -e PORT=8888 \
+            -e FORWARDED_ALLOW_IPS='*' \
+            -e GUNICORN_WORKERS=1 \
+            -e API_PASSWORD="${PASSWORD}" \
+            -e DISABLE_HOME_PAGE=true \
+            -e DISABLE_DOCS=true \
+            -e DISABLE_SPEEDTEST=true \
+            mhdzumair/mediaflow-proxy:v2.4.9
+
+          # DISABLE_HOME_PAGE makes a HTTP readiness check meaningless, so wait on
+          # the socket instead of on a known-good URL.
+          for attempt in $(seq 1 60); do
+            if (exec 3<>/dev/tcp/127.0.0.1/8888) 2>/dev/null; then
+              echo "MediaFlow is listening (attempt ${attempt})"
+              exit 0
+            fi
+            sleep 2
+          done
+
+          echo "::error::MediaFlow never opened port 8888"
+          docker logs mediaflow || true
+          exit 1
+
+      - name: Probe the Cuevana path from this IP
+        working-directory: workers/addon
+        env:
+          MEDIAFLOW_BASE: http://127.0.0.1:8888
+        run: npx --yes tsx scripts/probe-datacenter.ts "${{ inputs.slug }}"
+
+      - name: MediaFlow logs
+        if: always()
+        run: docker logs mediaflow 2>&1 | tail -40 || true
