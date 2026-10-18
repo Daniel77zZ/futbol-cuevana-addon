@@ -34,7 +34,10 @@ const client = MediaFlowClient.fromEnv({
   MEDIAFLOW_API_PASSWORD: apiPassword,
 } as unknown as Env);
 
-const slugs = process.argv.slice(2).length > 0 ? process.argv.slice(2) : DEFAULT_SLUGS;
+// A push-triggered run passes no inputs, which arrives as an empty argument
+// rather than as no argument. Filter those out so the defaults still apply.
+const args = process.argv.slice(2).filter((arg) => arg.trim().length > 0);
+const slugs = args.length > 0 ? args : DEFAULT_SLUGS;
 
 function hostOf(url: string, base?: string): string {
   try {

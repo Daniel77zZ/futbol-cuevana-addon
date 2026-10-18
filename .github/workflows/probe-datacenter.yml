@@ -6,7 +6,11 @@
 # to find out, this runs the real engine on a GitHub-hosted runner -- itself a
 # datacenter IP -- and exercises the real path end to end.
 #
-# Manual only on purpose. It is a diagnostic, not part of the pipeline.
+# Manual, plus a push trigger scoped to this file alone. The manual trigger is
+# not enough on its own: the API and the UI resolve a workflow against the
+# default branch, so dispatch 404s until this file reaches main. The push
+# trigger is what makes it runnable before then, and it is self-limiting -- it
+# can only fire when this file itself changes.
 #
 # Free to run: no signup, no card, no cloud account.
 
@@ -16,6 +20,9 @@ permissions:
   contents: read
 
 'on':
+  push:
+    paths:
+      - '.github/workflows/probe-datacenter.yml'
   workflow_dispatch:
     inputs:
       slug:
@@ -77,7 +84,11 @@ jobs:
         working-directory: workers/addon
         env:
           MEDIAFLOW_BASE: http://127.0.0.1:8888
-        run: npx --yes tsx scripts/probe-datacenter.ts "${{ inputs.slug }}"
+        run: |
+          # inputs.slug is empty on a push-triggered run, so only pass it when
+          # it is actually set; the script falls back to its own default.
+          SLUG="${{ inputs.slug }}"
+          npx --yes tsx scripts/probe-datacenter.ts ${SLUG:+"$SLUG"}
 
       - name: MediaFlow logs
         if: always()
