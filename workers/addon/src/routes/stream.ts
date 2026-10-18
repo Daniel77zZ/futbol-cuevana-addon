@@ -26,13 +26,12 @@ const SOURCES: Record<string, { label: string; base: string }> = {
 
 /**
  * Stremio content types do not match the resolver workflow's target choices.
- * The workflow declares `target` as a choice of futbol/cine/series and
- * validates it, so translate before dispatching.
+ * The workflow declares `target` as a single choice, `futbol`, and validates it,
+ * so translate before dispatching. Only football still reaches the resolver:
+ * Cuevana is resolved in-process by MediaFlow above.
  */
-const TARGET_BY_TYPE: Record<string, string> = {
+const TARGET_BY_TYPE: Record<string, "futbol"> = {
   tv: "futbol",
-  movie: "cine",
-  series: "series",
 };
 
 /**
@@ -170,9 +169,17 @@ export async function resolveStreams(env: Env, type: string, id: string): Promis
     }
   }
 
-  // 4. Fallback to existing resolver workflow
+  // 4. Fallback to the resolver workflow. Only football still has one: the
+  //    workflow's `target` choice is `futbol` alone, because MediaFlow resolves
+  //    Cuevana in-process above. Dispatching an undeclared target makes GitHub
+  //    reject the whole request, so bail out honestly instead.
+  const target = TARGET_BY_TYPE[type];
+  if (!target) {
+    logInfo("no_resolver_for_type", { type, id });
+    return [];
+  }
+
   const sourceUrl = await getEmbedUrlFromCatalog(kv, type, id);
-  const target = TARGET_BY_TYPE[type] ?? type;
   console.log("DEBUG: resolveStreams fallback", { type, target, id, sourceUrl });
   await triggerResolveWorkflow(env, { target, id, url: sourceUrl });
 

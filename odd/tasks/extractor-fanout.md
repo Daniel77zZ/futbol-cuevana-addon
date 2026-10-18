@@ -28,6 +28,10 @@ via decryptor/cuevana-native/vidhide remain the source set).
 
 ## Tasks
 
+> Status 2026-10-18: **F1–F4 and F5-A are complete** (commits `ff0f5eb`, `55356c1`,
+> `fe89701`, `b24e855`, `f329ff7`, `0b46850`). The boxes below were never ticked as
+> the work shipped; the dated log at the end of this file is the accurate record.
+
 - [ ] **F1 — Unify catalog KV key version** (route: delegated direct; trigger:
   writer, 2+ files). Files: `workers/addon/src/utils/cache.ts`,
   `.github/workflows/daily-catalog.yml`. Decision: revert reader to v1
@@ -160,10 +164,68 @@ per commit only if the user-owned switch is on.
     - `extractCuevanaServers` on the live page: **268 ms, 2 servers, document order and labels correct** — `[1] Hyper → .lol/v/i2i3sro4pzpg`, `[3] Nebula → .lol/e/lpeqh2058ul9`.
     - Validation matrix: `Hyper+StreamHG` PASS (1509 ms), `Hyper+StreamWish` PASS (3675 ms), `Nebula` fails on both hosts (per-title, as expected) → **2 playable streams, the dead one filtered out**.
     - `GET` the built `…/extractor/video.m3u8?host=StreamHG&d=…&redirect_stream=true` → **200, `#EXTM3U`, 834 bytes, `RESOLUTION=1280x720`**. Manifest is real and rewritten.
-  - Out of scope on purpose: `index.ts` `handleVideoProxy` and `rewriteToProxy` are left untouched — with MediaFlow they are dead for the Cuevaana path, and they still carry a stale `vidlink.pro` referer default. Removing them is separate debt. Same for the `vidhide` target in `clients/github.ts` + `.github/workflows/resolve-on-demand.yml` (now unused by Cuevana, harmless).
+  - ~~Out of scope on purpose~~ **SUPERSEDED 2026-10-18 — see phases 3+4 below.** The `vidhide` target in `clients/github.ts` + `.github/workflows/resolve-on-demand.yml` is deleted, not left as harmless debt. And the claim that `handleVideoProxy` + `rewriteToProxy` are "dead for the Cuevaana path" was **correct but dangerous**: they are **LIVE for football**, rewriting the four CDNs that block datacenter IPs (`flood.sourcerrr.online`, `sacdn.hakunaymatata.com`, `noon.mooncase.online`, `cloudorchestranova.com`). They stay. Only their hardcoded `vidlink.pro` referer remains suspect and needs a real football stream to verify.
   - **LOCAL END-TO-END through the real Worker** (2026-10-15, `wrangler dev` + local MediaFlow, `/tmp/opencode/local_e2e.sh`):
     - `GET /manifest.json` → 200, Worker up in ~4 s.
     - `GET /stream/movie/cu-apuntes-para-una-ficcion-consentida.json` → **200 in 5144 ms, 2 streams** — served from the **warm path**: candidates persisted by a previous run in `.wrangler/state/v3/kv` (local KV survives dev restarts), returning `name: "Cuevana · mediaflow"`, `title/quality: "720p"`. This proves the F3+F4 pipeline (`saveCandidates` → `fetchTrueQuality` reading the MediaFlow manifest → `rankAndResolveCandidates`) works on top of the new MediaFlow URLs.
     - `GET /stream/series/cu-4-blocks-zero/episodio-1x4.json` → **200 in 5218 ms, 4 streams** — cold path: `Hyper×StreamHG`, `Hyper×StreamWish`, `Nebula×StreamHG`, `Nebula×StreamWish` (Nebula **did** validate for this title, re-confirming the `/e/` failure is per-title, not per-host). First URL: `302` → `…/proxy/hls/manifest.m3u8?…d=…acek-cdn.com/hls2/…/master.m3u8…` → **200, `#EXTM3U`, 1238 bytes, `RESOLUTION=1280x720`, 25 fps**.
     - `GET /stream/book/cu-x.json` → 400 (unsupported type guard).
   - **BUG FOUND — unresolved `cu-*` falls through to the legacy GitHub Actions fallback.** With `cu-no-existe-jamas-xyz` the Worker (a) dispatched the resolver workflow with `sourceUrl: 'https://cuevana3r.pro/no-existe-jamas-xyz'` — a **malformed URL**, because `buildSourceUrl` splits on the first dash and drops the `/pelicula/` segment — and (b) then entered `pollForStream` (`POLL_ATTEMPTS = 60` × `POLL_INTERVAL_MS = 3000`) = **up to 3 minutes of polling**. Observed: 20+ consecutive `KV getJson stream:movie:cu-no-existe-jamas-xyz` lines and the request still unresolved at the 60 s client cutoff. Pre-existing behaviour, but **more likely now** because `.m3u8` validation rejects dead servers that used to be returned anyway. There is no legitimate cuevana fallback in that workflow. Proposed fix: for `cu-*`, return `[]` immediately once MediaFlow resolution yields nothing.
+
+## Log — cleanup phases 3 and 4 (2026-10-18)
+
+Cleanup plan ("seguir en limpio"), executed in measured evidence-backed phases
+after the local end-to-end run. Phases 1+2 shipped in `0b46850`; 3+4 here.
+
+**Phase 3 — retire the `vidhide` target end-to-end.** The Worker had zero
+references to it (verified: no matches for `streamType` / `"vidhide"` anywhere
+under `workers/addon/src`), yet it was still declared on both sides of the
+dispatch contract.
+- `workers/addon/src/clients/github.ts` — `DispatchInputs.target` narrowed from
+  `string` to the literal `"futbol"`; the `stream_type` field removed.
+- `.github/workflows/resolve-on-demand.yml` — `vidhide` dropped from the `target`
+  choice, the `stream_type` input removed, the validation regex reduced to
+  `^futbol$`, and the four-branch `case` replaced by a single guard with
+  `STREAM_TYPE="tv"`.
+
+**Phase 4 — delete the Python extraction that MediaFlow replaced.**
+- `extractors/vidhide.py` (27 KB) and `extractors/cuevana.py` (4.6 KB) deleted.
+  Verified **before** deleting: their only importer was `extractors/main.py`;
+  `tvf90.py` depends on neither; `extractors/Dockerfile` uses `COPY . .` so no
+  explicit file list breaks; zero other references repo-wide.
+- `extractors/main.py` — the `.cuevana` / `.vidhide` imports and dispatch branches
+  removed (they were **eager top-level imports**, so those 32 KB were a hard
+  dependency of *every* run, football included), `--type` reduced to
+  `choices=["futbol"]`, epilog and help text corrected.
+- `extractors/scrape_cuevana_catalog.py:93` — `prefix = "cu" if content_type ==
+  "movie" else "cu"` collapsed to `prefix = "cu"`.
+- **Deliberately NOT deleted: `extractors/`.** It is LIVE twice over —
+  `resolve-on-demand.yml:73` installs it, and `daily-catalog.yml` runs
+  `scrape_futbol_catalog.py` + `scrape_cuevana_catalog.py` on a 06:00 UTC cron to
+  build the Stremio catalogs. MediaFlow does extraction and playback only; it
+  cannot crawl catalogs.
+
+**Worker-side coupling fix (`routes/stream.ts`).** Deleting `cine`/`series` from
+the workflow would have left the Worker able to dispatch an undeclared target
+(GitHub rejects those with 422), so:
+- `TARGET_BY_TYPE` is now `Record<string, "futbol"> = { tv: "futbol" }`.
+- Step 4 gained an explicit guard: an unmapped type logs `no_resolver_for_type`
+  and returns `[]` instead of dispatching. The previous `?? type` fallback could
+  send a raw Stremio type as a workflow target.
+
+**Confirmed before deleting anything:** the catalog→Worker id contract holds.
+`scrape_cuevana_catalog.py:85-94` extracts the *real* slug from
+`/pelicula/{slug}` or `/serie/{slug}` and prefixes `cu-`; `stream.ts:99` does
+`id.slice(3)` into the same path shape.
+
+**Verified (wrangler dev + MediaFlow, `/tmp/opencode/regress.sh`):** movie → 200,
+2 streams, 4996 ms; series → 200, 4 streams, 5038 ms; unresolved `cu-*` → 200,
+0 streams, 219 ms; non-`cu-` movie id → 200, 0 streams, **35 ms** (previously a
+dispatch plus a 3-minute poll). Log counts: `no_resolver_for_type` 1,
+`resolveStreams fallback` 0, `gh_dispatch` 0. `npm run typecheck` is **green**,
+both workflow YAMLs parse, and all remaining Python compiles.
+
+**Open, not decided:** whether MediaFlow's football extractors (`Sportsonline`,
+`LiveTV`, `Vavoo`) can also replace `extractors/tvf90.py`. **Unverified** — the
+football axis has never been exercised against MediaFlow, and `tvf90.py` is the
+one extractor still required. Needs a live match to test.

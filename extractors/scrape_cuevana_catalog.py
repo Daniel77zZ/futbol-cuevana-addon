@@ -90,7 +90,9 @@ def parse_movie_card(card: BeautifulSoup, base_url: str, content_type: str) -> O
         if not slug:
             slug = re.sub(r'[^a-z0-9]+', '-', f"{title}-{year}".lower()).strip('-')
         
-        prefix = "cu" if content_type == "movie" else "cu"
+        # Cuevana uses the same "cu" prefix for movies and series; the Stremio
+        # type below is what distinguishes them.
+        prefix = "cu"
         content_id = f"{prefix}-{slug}"
         
         # Determine type for Stremio

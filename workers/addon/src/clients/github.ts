@@ -8,12 +8,10 @@ import { logError, logInfo } from "../utils/cache";
  * so treat these names as a hard contract with that file.
  */
 export interface DispatchInputs {
-  /** One of the workflow's declared choices: futbol | cine | series | vidhide. */
-  target: string;
+  /** The workflow's only remaining declared choice: futbol. */
+  target: "futbol";
   id: string;
   url: string;
-  /** Stream type for vidhide target: "movie" | "series". Required when target=vidhide. */
-  stream_type?: string;
 }
 
 /**

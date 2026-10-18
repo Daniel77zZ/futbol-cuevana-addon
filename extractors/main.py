@@ -11,8 +11,6 @@ from typing import Optional
 from pydantic import HttpUrl
 
 from .tvf90 import extract_tvf90_hls, TVF90Result
-from .cuevana import extract_cuevana_hls, CuevanaResult
-from .vidhide import extract_vidhide_hls, VidHideResult
 from .shared.utils import setup_logger
 
 logger = setup_logger("main")
@@ -32,9 +30,10 @@ async def run_extraction(
     Run extraction based on type.
 
     Args:
-        extract_type: 'futbol' (tvf90), 'cine' or 'series' (cuevana hosts), 'vidhide' (tungtungsahur/VidHide)
+        extract_type: only 'futbol' (tvf90). Cuevana and VidHide extraction now live
+            in the MediaFlow Proxy, which the Worker calls directly.
         embed_url: The embed URL to extract from
-        headless: Run browser in headless mode (for tvf90, vidhide)
+        headless: Run browser in headless mode (for tvf90)
 
     Returns:
         Dictionary with hls, quality, sourceUrl
@@ -43,48 +42,31 @@ async def run_extraction(
         logger.info("Running tvf90 extraction for: %s", embed_url)
         result: TVF90Result = await extract_tvf90_hls(embed_url, headless=headless)
         return result.model_dump(mode="json")
-    elif extract_type in ("cine", "series"):
-        logger.info("Running cuevana extraction for: %s", embed_url)
-        result: CuevanaResult = await extract_cuevana_hls(embed_url)
-        return result.model_dump(mode="json")
-    elif extract_type == "vidhide":
-        logger.info("Running vidhide extraction for: %s", embed_url)
-        result: VidHideResult = await extract_vidhide_hls(embed_url, headless=headless)
-        return result.model_dump(mode="json")
-    else:
-        raise ValueError(f"Unknown extract type: {extract_type}. Use 'futbol', 'cine', 'series', or 'vidhide'")
+
+    raise ValueError(f"Unknown extract type: {extract_type}. Use 'futbol'.")
 
 
 def main() -> int:
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
-        description="Extract HLS URLs from futbol/cine/series embed pages",
+        description="Extract HLS URLs from futbol embed pages",
         formatter_class=argparse.RawDescriptionHelpFormatter,
 epilog="""
 Examples:
   python -m extractors.main --type futbol --id fc-river-boca \\
        --url "https://tvf90.com/1.php?stream=sportv" --output /tmp/result.json
-
-  python -m extractors.main --type cine --id cu-resident-evil \\
-       --url "https://fembed.net/v/abc123" --output /tmp/result.json
-
-  python -m extractors.main --type series --id cu-breaking-bad-s01e01 \\
-       --url "https://gounlimited.to/embed/xyz123" --output /tmp/result.json
-
-  python -m extractors.main --type vidhide --id test \\
-       --url "https://tungtungsahur.cuevana3k.pro/?token=1D0VEA0dMAQ1AVVdW" --output /tmp/test.json
          """,
     )
     parser.add_argument(
         "--type",
-        choices=["futbol", "cine", "series", "vidhide"],
+        choices=["futbol"],
         required=True,
-        help="Extraction type: futbol (tvf90), cine or series (cuevana hosts), vidhide (tungtungsahur/VidHide)",
+        help="Extraction type: futbol (tvf90)",
     )
     parser.add_argument(
         "--id",
         required=True,
-        help="Content ID (e.g., fc-river-boca, cu-resident-evil)",
+        help="Content ID (e.g., fc-river-boca)",
     )
     parser.add_argument(
         "--url",
