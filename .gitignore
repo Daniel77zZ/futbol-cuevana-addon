@@ -88,3 +88,14 @@ workers/addon/*.log
 *.temp
 tmp/
 temp/
+
+# Ad-hoc capture / scratch artifacts (root) — never commit
+/meta_api_response.json
+/player_*.json
+/player_page.html
+/player_js.js
+/vsdec_packed.js
+/test.json
+/test_chacha.mjs
+/test_custom_chacha.mjs
+/test_final.mjs
