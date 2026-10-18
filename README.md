@@ -1,6 +1,6 @@
 # Fútbol Libre + Cuevana Stremio Addon
 
-A **Stremio addon** that provides live football matches, movies, and series from Fútbol Libre and Cuevana sources. Built on **Cloudflare Workers + KV** for zero-cost, serverless streaming with **GitHub Actions** for on-demand stream resolution.
+A **Stremio addon** that provides live football matches, movies, and series from Fútbol Libre and Cuevana sources. Built on **Cloudflare Workers + KV** for serverless stream caching, with **GitHub Actions** resolving football on demand and a self-hosted **MediaFlow Proxy** handling Cuevana extraction and HLS proxying.
 
 ## Architecture Overview
 
@@ -19,12 +19,26 @@ A **Stremio addon** that provides live football matches, movies, and series from
             └──────┬───────┘          └──────┬───────┘    │
                    │                         │              │
                    ▼                         ▼              │
-            ┌──────────────────────────────────────────────┐
-            │           Extractors (Python + Playwright)   │
-            │  • tvf90.com / fubo18.com (Playwright)       │
-            │  • Cuevana hosts via yt-dlp                  │
-            └──────────────────────────────────────────────┘
+            ┌───────────────────────────┐  ┌──────────────────────────┐
+            │ GitHub Actions (Resolvers)│  │ MediaFlow Proxy          │
+            │           +               │  │ (self-hosted, required)  │
+            │ Daily Catalog (Scrapers)  │  │ • extracts the embed     │
+            └─────────────┬─────────────┘  │ • rewrites HLS manifest  │
+                          │                │ • proxies the segments   │
+                          ▼                └──────────────────────────┘
+            ┌───────────────────────────┐
+            │ Extractors (Python +      │
+            │ Playwright) • tvf90.com   │
+            └───────────────────────────┘
 ```
+
+The Worker has **two independent resolution paths**:
+
+- **Football** (`fc-*` / `tv-*`) → dispatches the GitHub Actions resolver, which
+  runs the Python extractors.
+- **Cuevana** (`cu-*`) → calls **MediaFlow Proxy** directly. The Worker only
+  fetches the page and decodes the embed; MediaFlow does extraction, manifest
+  rewriting and segment proxying. This path never dispatches a workflow.
 
 ### Key Components
 
@@ -32,20 +46,31 @@ A **Stremio addon** that provides live football matches, movies, and series from
 |-----------|------------|---------|
 | **Addon API** | Cloudflare Worker (TypeScript) | Serves Stremio manifest, catalogs, meta, streams |
 | **Stream Cache** | Cloudflare KV | 2-hour TTL for resolved HLS URLs |
+| **Candidate Store** | Cloudflare KV | Ranked candidates per id, served without re-extracting |
 | **Catalog Cache** | Cloudflare KV | 24-hour TTL for daily-scraped catalogs |
-| **On-Demand Resolver** | GitHub Actions + Python/Playwright | Extracts HLS URLs when users click play |
+| **MediaFlow Proxy** | Self-hosted Python service | **Cuevana**: extraction, HLS manifest rewrite, segment proxying |
+| **On-Demand Resolver** | GitHub Actions + Python/Playwright | **Football**: extracts HLS URLs when a user clicks play |
 | **Daily Catalog Scraper** | GitHub Actions (scheduled) | Scrapes Fútbol Libre agenda + Cuevana catalogs |
-| **Local Dev** | Docker Compose | Mock KV + Extractors + Worker hot-reload |
+| **Local Dev** | Docker Compose | Mock KV + MediaFlow + Extractors + Worker hot-reload |
 
 ### Flow: User Clicks Play
 
-1. Stremio requests `/stream/tv/fc-river-boca.json`
-2. Worker checks KV for fresh entry (< 2h)
-3. **Cache hit** → returns HLS immediately
-4. **Cache miss** → dispatches `resolve-on-demand.yml` workflow
-5. Worker polls KV for up to 30s (15×2s)
-6. GitHub Action runs extractor, writes to KV
-7. Worker returns stream to Stremio
+**Football** — `/stream/tv/fc-river-boca.json`:
+
+1. Worker checks KV for a fresh candidate set
+2. **Hit** → ranks and returns the best HLS stream
+3. **Miss** → dispatches `resolve-on-demand.yml` and polls KV for up to **3
+   minutes** (`POLL_ATTEMPTS = 60` × `POLL_INTERVAL_MS = 3000`)
+4. The Action runs the extractor, writes to KV, and the Worker returns the stream
+
+**Cuevana** — `/stream/movie/cu-<slug>.json`:
+
+1. Worker fetches the Cuevana page and decodes the embed URL
+2. Worker asks MediaFlow to validate the candidate hosts
+3. Playable candidates are persisted, ranked by true resolution, and returned
+4. If nothing validates it returns an **empty list immediately** — no workflow
+   dispatch and no polling, so a bad slug fails in ~200 ms instead of timing out
+
 
 ---
 
@@ -58,6 +83,9 @@ A **Stremio addon** that provides live football matches, movies, and series from
 - **TMDB API key** (free at [themoviedb.org](https://www.themoviedb.org/settings/api))
 - **GitHub Personal Access Token** with `workflow` scope
 - **Node.js 20+** and **Docker** (for local dev)
+- **A MediaFlow Proxy you host** — required for Cuevana movies and series. The
+  Worker reaches it over the public internet, so running it on your own machine
+  is not enough. See [MediaFlow Proxy](#mediaflow-proxy-required-for-cuevana).
 
 ### 1. Fork & Clone
 
@@ -136,15 +164,44 @@ wrangler kv namespace create "STREAMS_KV" --preview
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
 | `daily-catalog.yml` | Daily 06:00 UTC + manual | Scrapes Fútbol Libre agenda + Cuevana movies/series catalogs |
-| `resolve-on-demand.yml` | Manual / Worker dispatch | Resolves single stream URL via extractors |
+| `resolve-on-demand.yml` | Manual / Worker dispatch | **Football only.** Resolves a single stream URL via the Python extractors |
 
-**Trigger resolver manually:**
+**Trigger resolver manually** (the inputs are `target`, `id` and `url` — `url` is required):
+
 ```bash
 gh workflow run resolve-on-demand.yml \
-  -f type=futbol \
+  -f target=futbol \
   -f id=fc-river-boca \
-  -f sourceUrl="https://tvf90.com/1.php?stream=sportv"
+  -f url="https://tvf90.com/1.php?stream=sportv"
 ```
+
+This workflow no longer handles Cuevana: `cu-*` requests are resolved in-process
+by MediaFlow and are never dispatched here.
+
+### MediaFlow Proxy (required for Cuevana)
+
+MediaFlow Proxy is the extraction and playback engine for Cuevana movies and
+series. It is a separate service you host; the Worker calls it over HTTPS.
+
+**Without a reachable MediaFlow, every Cuevana movie and series returns an empty
+stream list.** It does not error — it returns `[]` and logs `cuevana_unresolved`,
+so a misconfigured deployment looks like "no streams available" rather than a
+failure.
+
+Deployment files and the full procedure: [`deploy/mediaflow/`](deploy/mediaflow/).
+
+Two different mechanisms are involved, and mixing them up is the usual mistake:
+
+```bash
+# MEDIAFLOW_BASE          -> a plain var in workers/addon/wrangler.toml -> [vars]
+# MEDIAFLOW_API_PASSWORD  -> a Worker secret, never a var
+cd workers/addon
+npx wrangler secret put MEDIAFLOW_API_PASSWORD
+npx wrangler deploy
+```
+
+Football does **not** use MediaFlow — it still goes through the GitHub Actions
+resolver and the Python extractors.
 
 ---
 
@@ -167,7 +224,12 @@ docker-compose -f docker-compose.local.yml up -d --build
 |---------|-----|-------------|
 | **Addon Worker** | http://localhost:8787 | `wrangler dev --local` with mock KV |
 | **Mock KV** | http://localhost:8080 | Flask server mimicking Cloudflare KV API |
-| **Extractors** | `docker exec -it futbol-extractors bash` | Python environment with Playwright + yt-dlp |
+| **MediaFlow** | http://localhost:8888 | Cuevana extraction + HLS proxying (same pinned image as production) |
+| **Extractors** | `docker exec -it futbol-extractors bash` | Python environment with Playwright (football only) |
+
+Set `MEDIAFLOW_API_PASSWORD` in your shell before `up` if you want the local
+MediaFlow instance to enforce a password; the compose file passes it to the
+Worker and to MediaFlow from that single variable, so they cannot disagree.
 
 ### Test Locally
 

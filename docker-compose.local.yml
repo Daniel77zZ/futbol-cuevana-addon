@@ -75,9 +75,32 @@ services:
       - GH_REPO=${GH_REPO:-user/futbol-cuevana-addon}
       - GH_WORKFLOW=resolve-on-demand.yml
       - GH_REF=main
+      # Cuevana resolution goes through MediaFlow, not through the extractors.
+      # Without this the Worker returns [] for every Cuevana id.
+      - MEDIAFLOW_BASE=http://mediaflow:8888
+      - MEDIAFLOW_API_PASSWORD=${MEDIAFLOW_API_PASSWORD:-}
     depends_on:
       mock-kv:
         condition: service_healthy
+    networks:
+      - local-dev
+
+  # MediaFlow Proxy -- extraction + playback engine for the Cuevana path.
+  # Same pinned image as deploy/mediaflow/fly.toml so local runs match the
+  # deployed one. No Playwright/Chromium is involved, so the slim upstream image
+  # is enough.
+  mediaflow:
+    image: mhdzumair/mediaflow-proxy:v2.4.9
+    container_name: futbol-mediaflow
+    ports:
+      - "8888:8888"
+    environment:
+      - API_PASSWORD=${MEDIAFLOW_API_PASSWORD:-}
+      # The image's CMD defaults this to 127.0.0.1, which breaks forwarded
+      # headers whenever it is not reached directly.
+      - FORWARDED_ALLOW_IPS=*
+      # No Redis in this compose, so extra workers would duplicate extraction.
+      - GUNICORN_WORKERS=1
     networks:
       - local-dev
 
