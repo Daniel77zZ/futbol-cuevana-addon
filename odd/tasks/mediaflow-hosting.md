@@ -85,6 +85,26 @@ resolution logic itself (shipped in `b24e855`) and the football extractors.
 - **sslip.io works for certificate issuance without owning a domain.** Verified
   2026-10-18: both `203.0.113.10.sslip.io` and the `.nip.io` equivalent resolve
   to the embedded IP, so Caddy can complete an ACME HTTP-01 challenge against it.
+- **The datacenter-IP question is answered: YES, it works.** Verified 2026-10-18
+  from a GitHub-hosted runner — itself a datacenter IP, egress `20.109.38.241`
+  (Azure) — running the real extractor and the real MediaFlow client. The Cuevana
+  page fetched, both `?token=` servers were found, the embed decoded to the same
+  host a residential IP gets, and **both** hosts returned an `#EXTM3U` master
+  playlist and real segment bytes (StreamHG 7,204 B, StreamWish 323,708 B). The
+  domain is Cloudflare-fronted but the datacenter range was **not** refused.
+  Reproduce with the `probe-datacenter` workflow; note `workflow_dispatch` cannot
+  start it until that file reaches `main`, so on a branch it runs via its own
+  push trigger.
+- **Egress really does flow through the host — measured, not assumed.** Both
+  hosts answered `proxied_through_mediaflow=true`: the playlist 302s to
+  `/proxy/hls/manifest.m3u8`, and the manifest's first segment resolved back to
+  the MediaFlow instance rather than to the CDN. The ~1.1 GB/h figure is
+  therefore the **operator's** bill, which is what the whole cost comparison
+  rested on, and it means included-transfer-in-plan beats metered egress.
+- **The video CDN behind StreamHG is `acek-cdn.com`.** StreamHG's manifest
+  registered 476 media segments with HLS prebuffering active
+  (`prefetch_limit=5`), so `ENABLE_HLS_PREBUFFER` is on by default in practice
+  and the memory guidance for a 1 GB box stands.
 
 ## Decision log
 
@@ -96,26 +116,48 @@ resolution logic itself (shipped in `b24e855`) and the football extractors.
   left as dead config, and TLS moved from Fly's automatic certificates to Caddy
   with a Let's Encrypt certificate. The tradeoff accepted: an unmanaged host means
   OS updates, firewall rules and certificate renewal are now ours.
+- **2026-10-18 — DigitalOcean rejected by the user; hosting target returned to
+  undecided.** A $24 minimum was seen at checkout, which contradicts the verified
+  panel prices ($4 / $6 / $12) and was not argued against: the user's screen is
+  the authority on what they are willing to pay. Oracle Cloud Always Free was
+  raised as the free alternative and rejected on account-validation grounds
+  ("su validacion ya intente un monton"), consistent with its documented
+  requirement for a real card. Consequence: the deploy artifacts stay
+  provider-agnostic, and the README's provider section is the only part that must
+  change when a host is finally chosen.
+- **2026-10-18 — the datacenter-IP risk was retired for $0 before renting
+  anything.** Renting first would have meant paying to answer a question a
+  GitHub-hosted runner answers for free, since the runner is itself a datacenter
+  IP with Docker available. The sequencing is the reusable part: the unknown that
+  could have invalidated every candidate host was retired before any money moved,
+  and it came back PASS.
 
 ## Status
 
-H1–H4 done and committed on `feat/extractor-fanout`. Hosting target: **DigitalOcean**
-(superseding the earlier Fly.io choice; see the decision log).
+H1–H4 done and committed on `feat/extractor-fanout`. **Hosting target:
+undecided.** Fly.io was priced and dropped on egress economics; DigitalOcean was
+chosen and then rejected by the user (a $24 minimum at checkout, which does not
+match the verified $4/$6/$12 panel prices); Oracle Cloud Always Free was rejected
+on account-validation grounds. See the decision log.
 
-**H5 is blocked on user-supplied access, not on work.** To proceed, the droplet
-must exist and be reachable:
+**The risk that justified renting a server first is now closed.** The
+datacenter-IP question was the one thing that could invalidate any host, and it is
+answered YES — for free, from a GitHub-hosted runner (see Evidence). Host choice
+is therefore a pure cost question rather than a gamble, and the cost axis is
+confirmed to be egress, because segments were measured to proxy through MediaFlow.
 
-1. A Droplet with `~/.ssh/navbr_mediaflow.pub` installed as an authorized key.
-2. The droplet's public IP supplied to the agent.
+**H5 is blocked on user-supplied access, not on work.** To proceed, any host with
+Docker must exist and be reachable:
+
+1. A VPS with `~/.ssh/navbr_mediaflow.pub` installed as an authorized key.
+2. That host's public IP supplied to the agent.
 
 Nothing else is needed to start: the deploy key exists, `ssh`/`scp`/`rsync` are
-present in the dev environment, the uppercase-less `sshpass` is absent so key
-auth is the only workable route, and `doctl` is not installed — the droplet is
-created by hand in the panel so the billing decision stays with the user.
+present in the dev environment, `sshpass` is absent so key auth is the only
+workable route, and `doctl` is not installed — the host is created by hand in a
+panel so the billing decision stays with the user. The deploy stack
+(`docker-compose.yml` + `Caddyfile` + `<IP>.sslip.io`) is provider-agnostic, so
+switching provider costs nothing beyond the README's provider section.
 
-**Open risk carried into H5:** the local end-to-end test ran from a residential
-IP. A datacenter IP may be refused by the CDN where a residential one is served,
-which is the same failure class `handleVideoProxy` and `rewriteToProxy` already
-work around for four football CDNs. Untestable until the droplet exists; test it
-as the first action after bring-up while the per-second billing keeps the cost
-negligible.
+**Remaining carried risk:** the probe exercised a single movie. The football path
+has still never been tested against MediaFlow.
