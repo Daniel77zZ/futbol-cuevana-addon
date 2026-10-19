@@ -161,3 +161,41 @@ switching provider costs nothing beyond the README's provider section.
 
 **Remaining carried risk:** the probe exercised a single movie. The football path
 has still never been tested against MediaFlow.
+
+## Local test rig — no Docker, no VPS, no tunnel (verified 2026-10-19)
+
+Docker is unusable here: the WSL side has no `docker` binary (Docker Desktop's
+WSL integration is off) and the Windows engine is not running. None of that is
+needed, because MediaFlow publishes to PyPI at the same version as the container
+image, so it runs natively.
+
+1. Install without Docker: `uv tool install --python 3.12 mediaflow-proxy==2.4.9`
+2. Run it by invoking uvicorn directly:
+
+   `~/.local/share/uv/tools/mediaflow-proxy/bin/python -m uvicorn \
+     mediaflow_proxy.main:app --host 127.0.0.1 --port 8888`
+
+   **Do not use the `mediaflow-proxy` console script.** Its `run()` hands the app
+   *object* plus `workers=3` to uvicorn, which warns that a worker count needs an
+   import string, then never binds the port. It fails silently: the only output is
+   that warning, with no traceback and no startup line.
+3. Run the addon locally:
+   `npx wrangler dev --port 8787 --var MEDIAFLOW_BASE:http://127.0.0.1:8888`
+4. Install in Stremio from `http://127.0.0.1:8787/manifest.json`.
+
+MediaFlow is bound to loopback, so it runs without an `api_password` and needs no
+secret in the Worker. Keep it off `0.0.0.0` unless a password is set with it.
+
+**Reachability was verified from the Windows side**, invoking
+`/mnt/c/Windows/System32/curl.exe` so the test exercises Windows networking
+rather than WSL's: both `http://127.0.0.1:8787/manifest.json` and
+`http://127.0.0.1:8888/health` return 200 from Windows, which is what makes a
+WSL-hosted addon usable by a Windows Stremio. The master playlist resolves at
+1280x720 (`avc1.64001f` + `mp4a.40.2`) and a segment fetch returns real bytes.
+
+**Gotcha:** `pkill -f mediaflow-proxy` matches the invoking shell's own command
+line — because that command line contains the string — and kills the shell. Track
+PIDs in files instead.
+
+**Caveat:** `127.0.0.1` URLs mean this rig only serves the machine it runs on. It
+proves the addon works; it is not a Stremio install for a TV.
